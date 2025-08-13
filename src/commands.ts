@@ -1,46 +1,37 @@
 import { Command, Options, Prompt } from "@effect/cli";
 import { Console, Effect } from "effect";
-import { Option } from "effect";
 import { Migration } from "./services/migrate";
 
-export const migrationProvider = Options.choice("provider", [
-  "lemonSqueezy",
-  "paddle",
-  "stripe",
-]).pipe(Options.withAlias("p"), Options.optional);
+export const migrate = Command.make("migrate", {}, () =>
+  Effect.gen(function* () {
+    const selectedProvider = yield* Prompt.select({
+      message: "Select Migration Provider",
+      choices: [
+        { value: "lemonSqueezy", title: "Lemon Squeezy" },
+        { value: "paddle", title: "Paddle" },
+        { value: "stripe", title: "Stripe" },
+      ],
+    }).pipe(Prompt.run);
 
-export const migrationAPIKey = Options.redacted("migrationAPIKey");
+    const apiKey = yield* Prompt.text({
+      message: "Enter the API Key",
+      validate: (value) => {
+        if (value.length === 0) {
+          return Effect.fail("API Key is required");
+        }
 
-export const migrate = Command.make(
-  "migrate",
-  { migrationProvider, migrationAPIKey },
-  ({ migrationProvider, migrationAPIKey }) =>
-    Effect.gen(function* () {
-      const provider = Option.match(migrationProvider, {
-        onSome: (provider) => provider,
-        onNone: () => null,
-      });
+        return Effect.succeed(value);
+      },
+    }).pipe(Prompt.run);
 
-      yield* Effect.log(provider, migrationAPIKey);
+    yield* Effect.log(selectedProvider, apiKey);
 
-      const migration = yield* Migration;
+    const migration = yield* Migration;
+    const products = yield* migration.products();
+    const customers = yield* migration.customers();
 
-      const products = yield* migration.products();
-      const customers = yield* migration.customers();
-
-      Prompt.text({
-        message: "Enter the API key for the migration provider",
-        validate: (value) => {
-          if (value.length === 0) {
-            return Effect.fail("API Key is required");
-          }
-
-          return Effect.succeed(value);
-        },
-      }).pipe(Prompt.run);
-
-      return Console.log(products, customers);
-    })
+    return Console.log(products, customers);
+  })
 );
 
 export const LemonSqueezyAPIKey = Options.redacted("lemonSqueezyAPIKey");
