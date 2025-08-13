@@ -27,9 +27,7 @@ export class LemonSqueezy extends Context.Tag("LemonSqueezy")<
 >() {}
 
 export const make = Effect.gen(function* () {
-  const apiKey = yield* Config.redacted(Config.string("LEMON_SQUEEZY_API_KEY"));
-
-  const client = createLemonClient(Redacted.value(apiKey));
+  const client = createLemonClient("");
 
   return LemonSqueezy.of({
     use: (fn) =>

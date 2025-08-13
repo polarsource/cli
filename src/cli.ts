@@ -3,6 +3,7 @@ import { migrate } from "./commands";
 import { Effect, Layer } from "effect";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import * as LemonSqueezy from "./services/migration/lemonSqueezy";
+import * as Migration from "./services/migrate";
 
 const VERSION = "v1.0.0";
 
@@ -15,6 +16,11 @@ const cli = Command.run(mainCommand, {
   version: VERSION,
 });
 
-const AllServices = Layer.mergeAll(LemonSqueezy.layer, NodeContext.layer);
+const MigrationProviders = Layer.mergeAll(LemonSqueezy.layer);
+
+const AllServices = Layer.mergeAll(
+  Layer.provideMerge(Migration.layer, MigrationProviders),
+  NodeContext.layer
+);
 
 cli(process.argv).pipe(Effect.provide(AllServices), NodeRuntime.runMain);

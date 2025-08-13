@@ -1,4 +1,4 @@
-import { Context, Effect, pipe, Schema } from "effect";
+import { Context, Effect, Layer, pipe, Schema } from "effect";
 import * as LemonSqueezy from "./migration/lemonSqueezy";
 import { Product } from "../schemas/Product";
 import { Customer } from "../schemas/Customer";
@@ -66,6 +66,8 @@ export const make = Effect.gen(function* () {
       }),
   });
 });
+
+export const layer = Layer.scoped(Migration, make);
 
 const resolveMigrationProvider = (provider: "lemonSqueezy" | "stripe") =>
   Effect.gen(function* () {

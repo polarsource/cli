@@ -1,4 +1,4 @@
-import { Command, Options } from "@effect/cli";
+import { Command, Options, Prompt } from "@effect/cli";
 import { Console, Effect } from "effect";
 import { Option } from "effect";
 import { Migration } from "./services/migrate";
@@ -27,6 +27,17 @@ export const migrate = Command.make(
 
       const products = yield* migration.products();
       const customers = yield* migration.customers();
+
+      Prompt.text({
+        message: "Enter the API key for the migration provider",
+        validate: (value) => {
+          if (value.length === 0) {
+            return Effect.fail("API Key is required");
+          }
+
+          return Effect.succeed(value);
+        },
+      }).pipe(Prompt.run);
 
       return Console.log(products, customers);
     })
