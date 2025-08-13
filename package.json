@@ -1,30 +1,35 @@
 {
-	"name": "polar-cli",
-	"version": "1.0.0",
-	"description": "",
-	"bin": "bin/cli.js",
-	"scripts": {
-		"build": "tsup ./src/cli.ts --format esm --outDir bin",
-		"dev": "tsc --watch",
-		"test": "echo \"Error: no test specified\" && exit 1",
-		"check": "biome check --write ./src"
-	},
-	"files": ["bin", "dist"],
-	"keywords": [],
-	"author": "",
-	"license": "Apache-2.0",
-	"packageManager": "pnpm@10.5.2",
-	"dependencies": {
-		"@effect/cli": "^0.69.0",
-		"@effect/platform": "^0.90.2",
-		"@effect/platform-node": "^0.95.0",
-		"effect": "^3.17.7"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "^2.1.4",
-		"@sindresorhus/tsconfig": "^8.0.1",
-		"@types/node": "^24.2.1",
-		"tsup": "^8.5.0",
-		"typescript": "^5.9.2"
-	}
+  "name": "polar-cli",
+  "version": "1.0.0",
+  "description": "",
+  "bin": "bin/cli.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsup ./src/cli.ts --format esm --outDir bin",
+    "dev": "tsc --watch",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "check": "biome check --write ./src"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "keywords": [],
+  "author": "",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.5.2",
+  "dependencies": {
+    "@effect/cli": "^0.69.0",
+    "@effect/platform": "^0.90.2",
+    "@effect/platform-node": "^0.95.0",
+    "@lemonsqueezy/lemonsqueezy.js": "^4.0.0",
+    "effect": "^3.17.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.1.4",
+    "@sindresorhus/tsconfig": "^8.0.1",
+    "@types/node": "^24.2.1",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.2"
+  }
 }
