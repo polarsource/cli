@@ -1,13 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
-import { createServer } from "node:http";
-import {
-  HttpRouter,
-  HttpServer,
-  HttpServerRequest,
-  HttpServerResponse,
-} from "@effect/platform";
-import { NodeHttpServer } from "@effect/platform-node";
-import { Console, Context, Data, Effect, Layer } from "effect";
+import { createServer, type Server } from "node:http";
+import path from "node:path";
+import { FileSystem } from "@effect/platform";
+import { NodeFileSystem } from "@effect/platform-node";
+import { Context, Data, Effect, Layer } from "effect";
+import open from "open";
+import os from "os";
 
 const SANDBOX_CLIENT_ID = "polar_ci_KTj3Pfw3PE54dsjgcjVT6w";
 const PRODUCTION_CLIENT_ID = "polar_ci_gBnJ_Yv_uSGm5mtoPa2cCA";
@@ -58,13 +56,62 @@ export const make = Effect.gen(function* () {
     login: (mode) =>
       Effect.gen(function* () {
         const accessToken = yield* getAccessToken(mode);
-
+        yield* saveAccessToken(accessToken);
         return accessToken;
       }),
   });
 });
 
 export const layer = Layer.scoped(OAuth, make);
+
+const tokenFilePath = Effect.sync(() =>
+  path.join(os.homedir(), ".polar", "tokens.json")
+);
+
+const tokenFileExists = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const filePath = yield* tokenFilePath;
+  return yield* fileSystem.exists(filePath);
+});
+
+const writeToTokenFile = (accessToken: string) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const filePath = yield* tokenFilePath;
+
+    yield* fileSystem.writeFile(
+      filePath,
+      new TextEncoder().encode(accessToken)
+    );
+  });
+
+const readTokenFile = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const filePath = yield* tokenFilePath;
+  return yield* fileSystem.readFile(filePath).pipe(
+    Effect.map((buffer) => new TextDecoder().decode(buffer)),
+    Effect.catchAll(Effect.die)
+  );
+});
+
+const createTokenFile = () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const filePath = yield* tokenFilePath;
+    yield* Effect.log("Creating token file");
+    yield* fileSystem.writeFile(filePath, new TextEncoder().encode(""));
+  });
+
+const saveAccessToken = (accessToken: string) =>
+  Effect.gen(function* () {
+    return yield* writeToTokenFile(accessToken).pipe(
+      Effect.whenEffect(tokenFileExists),
+      Effect.orElse(createTokenFile),
+      Effect.map(() => accessToken),
+      Effect.catchAll(Effect.die),
+      Effect.provide(NodeFileSystem.layer)
+    );
+  });
 
 const getAccessToken = (mode: "production" | "sandbox") =>
   Effect.gen(function* () {
@@ -77,31 +124,34 @@ const getAccessToken = (mode: "production" | "sandbox") =>
       codeChallenge
     );
 
-    yield* Effect.log("Setting up callback server...");
+    const accessToken = yield* Effect.async<string, OAuthError>((resume) => {
+      let server: Server | null;
 
-    const router = HttpRouter.empty.pipe(
-      HttpRouter.get(
-        "/",
-        HttpServerRequest.HttpServerRequest.pipe(
-          Effect.tap(() => Effect.log("Incoming")),
-          Effect.map((req) => HttpServerResponse.text("Successfully logged in"))
-        )
-      )
-    );
+      server = createServer((request, response) => {
+        if (server != null) {
+          // Complete the incoming HTTP request when a login response is received
+          response.write("Login completed for the console client ...");
+          response.end();
+          server.close();
+          server = null;
 
-    // Set up the application server with logging
-    const app = router.pipe(HttpServer.serve(), HttpServer.withLogAddress);
+          resume(
+            redeemCodeForAccessToken(
+              mode,
+              request.url ?? "",
+              state,
+              codeVerifier
+            )
+          );
+        }
+      });
 
-    // Create a server layer with the specified port
-    const server = NodeHttpServer.layer(() => createServer(), { port: 3333 });
+      server?.listen(3333, () => {
+        open(authorizationUrl);
+      });
+    });
 
-    Console.log("Callback server up and running");
-
-    return yield* Layer.launch(Layer.provide(app, server)).pipe(
-      Effect.tap(() => Effect.log("Callback server up and running")),
-      Effect.tap(() => open(authorizationUrl)),
-      Effect.catchTag("ServeError", Effect.die)
-    );
+    return accessToken;
   });
 
 const generateRandomString = Effect.sync(() => randomBytes(48).toString("hex"));
