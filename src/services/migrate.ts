@@ -1,4 +1,5 @@
 import { Context, Data, Effect, Layer, pipe, Schema } from "effect";
+import { Customer } from "../schemas/Customer";
 import { Product } from "../schemas/Product";
 import type * as LemonSqueezy from "./migration/lemonSqueezy";
 
@@ -12,6 +13,13 @@ export interface MigrationImpl {
     provider: LemonSqueezy.LemonSqueezyImpl
   ) => Effect.Effect<
     readonly Product[],
+    LemonSqueezy.LemonSqueezyError | MigrationError,
+    never
+  >;
+  customers: (
+    provider: LemonSqueezy.LemonSqueezyImpl
+  ) => Effect.Effect<
+    readonly Customer[],
     LemonSqueezy.LemonSqueezyError | MigrationError,
     never
   >;
@@ -48,6 +56,25 @@ export const make = Effect.gen(function* () {
             (error) =>
               new MigrationError({
                 message: "Failed to parse products",
+                cause: error,
+              })
+          )
+        );
+      }),
+    customers: (provider) =>
+      Effect.gen(function* () {
+        const providerCustomers = yield* provider.use((client) =>
+          client.listCustomers().then((query) => query.data?.data ?? [])
+        );
+
+        return yield* pipe(
+          providerCustomers,
+          Schema.decodeUnknown(Schema.Array(Customer)),
+          Effect.catchTag(
+            "ParseError",
+            (error) =>
+              new MigrationError({
+                message: "Failed to parse customers",
                 cause: error,
               })
           )

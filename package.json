@@ -24,7 +24,8 @@
     "@effect/platform-node": "^0.95.0",
     "@lemonsqueezy/lemonsqueezy.js": "^4.0.0",
     "@polar-sh/sdk": "^0.34.11",
-    "effect": "^3.17.7"
+    "effect": "^3.17.7",
+    "open": "^10.2.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.1.4",

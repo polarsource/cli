@@ -1,10 +1,12 @@
-import { Command, Prompt } from "@effect/cli";
+import { Command } from "@effect/cli";
 import { Effect } from "effect";
+import * as OAuth from "../services/oauth";
 
 export const login = Command.make("login", {}, () =>
   Effect.gen(function* () {
-    const apiKey = yield* Prompt.text({
-      message: "Enter the API Key",
-    }).pipe(Prompt.run);
+    const oauth = yield* OAuth.OAuth;
+    const accessToken = yield* oauth.login("production");
+
+    yield* Effect.log(accessToken);
   })
 );
