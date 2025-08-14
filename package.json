@@ -23,6 +23,7 @@
     "@effect/platform": "^0.90.2",
     "@effect/platform-node": "^0.95.0",
     "@lemonsqueezy/lemonsqueezy.js": "^4.0.0",
+    "@polar-sh/sdk": "^0.34.11",
     "effect": "^3.17.7"
   },
   "devDependencies": {

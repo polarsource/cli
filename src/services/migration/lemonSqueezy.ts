@@ -1,14 +1,14 @@
-import { Config, Context, Data, Effect, Layer, Redacted } from "effect";
 import {
   getAuthenticatedUser,
   lemonSqueezySetup,
+  listCustomers,
   listDiscounts,
   listFiles,
   listProducts,
   listStores,
   listVariants,
-  listCustomers,
 } from "@lemonsqueezy/lemonsqueezy.js";
+import { Context, Data, Effect, Layer } from "effect";
 
 export class LemonSqueezyError extends Data.TaggedError("LemonSqueezyError")<{
   message: string;
@@ -18,7 +18,7 @@ export class LemonSqueezyError extends Data.TaggedError("LemonSqueezyError")<{
 export interface LemonSqueezyImpl {
   use: <T>(
     fn: (client: ReturnType<typeof createLemonClient>) => T
-  ) => Effect.Effect<Awaited<T>, LemonSqueezyError>;
+  ) => Effect.Effect<Awaited<T>, LemonSqueezyError, never>;
 }
 
 export class LemonSqueezy extends Context.Tag("LemonSqueezy")<
@@ -26,38 +26,40 @@ export class LemonSqueezy extends Context.Tag("LemonSqueezy")<
   LemonSqueezyImpl
 >() {}
 
-export const make = Effect.gen(function* () {
-  const client = createLemonClient("");
+export const make = (apiKey: string) =>
+  Effect.gen(function* () {
+    const client = createLemonClient(apiKey);
 
-  return LemonSqueezy.of({
-    use: (fn) =>
-      Effect.gen(function* () {
-        const result = yield* Effect.try({
-          try: () => fn(client),
-          catch: (error) =>
-            new LemonSqueezyError({
-              message: "Failed to fetch data from Lemon Squeezy",
-              cause: error,
-            }),
-        });
-
-        if (result instanceof Promise) {
-          return yield* Effect.tryPromise({
-            try: () => result,
+    return LemonSqueezy.of({
+      use: (fn) =>
+        Effect.gen(function* () {
+          const result = yield* Effect.try({
+            try: () => fn(client),
             catch: (error) =>
               new LemonSqueezyError({
                 message: "Failed to fetch data from Lemon Squeezy",
                 cause: error,
               }),
           });
-        }
 
-        return result;
-      }),
+          if (result instanceof Promise) {
+            return yield* Effect.tryPromise({
+              try: () => result,
+              catch: (error) =>
+                new LemonSqueezyError({
+                  message: "Failed to fetch data from Lemon Squeezy",
+                  cause: error,
+                }),
+            });
+          }
+
+          return result;
+        }),
+    });
   });
-});
 
-export const layer = Layer.scoped(LemonSqueezy, make);
+export const layer = (apiKey: string) =>
+  Layer.scoped(LemonSqueezy, make(apiKey));
 
 export const createLemonClient = (apiKey: string) => {
   lemonSqueezySetup({
