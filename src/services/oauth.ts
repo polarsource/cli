@@ -1,11 +1,12 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
-import { FileSystem } from "@effect/platform";
+import { FileSystem, Path } from "@effect/platform";
 import { NodeFileSystem } from "@effect/platform-node";
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer, Logger, LogLevel, Schema } from "effect";
 import open from "open";
 import os from "os";
+import { Token, Tokens } from "../schemas/Tokens";
 
 const SANDBOX_CLIENT_ID = "polar_ci_KTj3Pfw3PE54dsjgcjVT6w";
 const PRODUCTION_CLIENT_ID = "polar_ci_gBnJ_Yv_uSGm5mtoPa2cCA";
@@ -47,70 +48,78 @@ export class OAuth extends Context.Tag("OAuth")<OAuth, OAuthImpl>() {}
 
 interface OAuthImpl {
   login: (
-    mode: "production" | "sandbox"
+    server: "production" | "sandbox"
   ) => Effect.Effect<string, OAuthError, never>;
 }
 
 export const make = Effect.gen(function* () {
   return OAuth.of({
-    login: (mode) =>
+    login: (server) =>
       Effect.gen(function* () {
-        const accessToken = yield* getAccessToken(mode);
-        yield* saveAccessToken(accessToken);
-        return accessToken;
-      }),
+        const token = yield* getAccessToken(server);
+        const savedToken = yield* saveToken(token);
+        return savedToken.token;
+      }).pipe(
+        Effect.provide(NodeFileSystem.layer),
+        Effect.provide(Path.layer),
+        Logger.withMinimumLogLevel(LogLevel.Debug),
+        Effect.catchAll(Effect.die)
+      ),
   });
 });
 
 export const layer = Layer.scoped(OAuth, make);
 
-const tokenFilePath = Effect.sync(() =>
-  path.join(os.homedir(), ".polar", "tokens.json")
-);
-
-const tokenFileExists = Effect.gen(function* () {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const filePath = yield* tokenFilePath;
-  return yield* fileSystem.exists(filePath);
+const tokenFilePath = Effect.gen(function* () {
+  const path = yield* Path.Path;
+  return path.join(os.homedir(), ".polar", "tokens.json");
 });
 
-const writeToTokenFile = (accessToken: string) =>
+const writeToTokenFile = (token: Token) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const filePath = yield* tokenFilePath;
 
-    yield* fileSystem.writeFile(
+    yield* Effect.logDebug("Writing token to file...");
+
+    const currentTokens = yield* readTokenFile;
+
+    yield* fileSystem.access(filePath).pipe(
+      Effect.catchTag("SystemError", (_SystemError) => {
+        return fileSystem.makeDirectory(path.dirname(filePath), {
+          recursive: true,
+        });
+      })
+    );
+
+    return yield* fileSystem.writeFile(
       filePath,
-      new TextEncoder().encode(accessToken)
+      new TextEncoder().encode(
+        JSON.stringify({
+          ...currentTokens,
+          [token.server]: token,
+        })
+      )
     );
   });
 
 const readTokenFile = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const filePath = yield* tokenFilePath;
+
+  yield* Effect.logDebug("Reading token file...");
+
   return yield* fileSystem.readFile(filePath).pipe(
     Effect.map((buffer) => new TextDecoder().decode(buffer)),
+    Effect.map((json) => JSON.parse(json)),
+    Schema.decodeUnknown(Tokens),
     Effect.catchAll(Effect.die)
   );
 });
 
-const createTokenFile = () =>
+const saveToken = (token: Token) =>
   Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const filePath = yield* tokenFilePath;
-    yield* Effect.log("Creating token file");
-    yield* fileSystem.writeFile(filePath, new TextEncoder().encode(""));
-  });
-
-const saveAccessToken = (accessToken: string) =>
-  Effect.gen(function* () {
-    return yield* writeToTokenFile(accessToken).pipe(
-      Effect.whenEffect(tokenFileExists),
-      Effect.orElse(createTokenFile),
-      Effect.map(() => accessToken),
-      Effect.catchAll(Effect.die),
-      Effect.provide(NodeFileSystem.layer)
-    );
+    return yield* writeToTokenFile(token).pipe(Effect.map(() => token));
   });
 
 const getAccessToken = (mode: "production" | "sandbox") =>
@@ -124,7 +133,7 @@ const getAccessToken = (mode: "production" | "sandbox") =>
       codeChallenge
     );
 
-    const accessToken = yield* Effect.async<string, OAuthError>((resume) => {
+    const accessToken = yield* Effect.async<Token, OAuthError>((resume) => {
       let server: Server | null;
 
       server = createServer((request, response) => {
@@ -205,7 +214,7 @@ const getLoginResult = (
   });
 
 const redeemCodeForAccessToken = (
-  mode: "production" | "sandbox",
+  server: "production" | "sandbox",
   responseUrl: string,
   requestState: string,
   codeVerifier: string
@@ -219,7 +228,7 @@ const redeemCodeForAccessToken = (
 
     let body = "grant_type=authorization_code";
     body += `&client_id=${encodeURIComponent(
-      mode === "production" ? PRODUCTION_CLIENT_ID : SANDBOX_CLIENT_ID
+      server === "production" ? PRODUCTION_CLIENT_ID : SANDBOX_CLIENT_ID
     )}`;
     body += `&redirect_uri=${encodeURIComponent(config.redirectUrl)}`;
     body += `&code=${encodeURIComponent(code)}`;
@@ -228,7 +237,7 @@ const redeemCodeForAccessToken = (
     const response = yield* Effect.tryPromise({
       try: () =>
         fetch(
-          mode === "production" ? PRODUCTION_TOKEN_URL : SANDBOX_TOKEN_URL,
+          server === "production" ? PRODUCTION_TOKEN_URL : SANDBOX_TOKEN_URL,
           {
             method: "POST",
             headers: {
@@ -254,7 +263,15 @@ const redeemCodeForAccessToken = (
     }
 
     const data = yield* Effect.tryPromise({
-      try: () => response.json() as Promise<{ access_token: string }>,
+      try: () =>
+        response.json() as Promise<{
+          access_token: string;
+          token_type: "Bearer";
+          expires_in: number;
+          refresh_token: string | null;
+          scope: string;
+          id_token: string;
+        }>,
       catch: (error) =>
         new OAuthError({
           message: "Failed to redeem code for access token",
@@ -262,5 +279,20 @@ const redeemCodeForAccessToken = (
         }),
     });
 
-    return data.access_token;
+    return yield* Schema.decodeUnknown(Token)({
+      token: data.access_token,
+      refreshToken: data.refresh_token,
+      expiresIn: data.expires_in,
+      scope: data.scope.split(" "),
+      server,
+    }).pipe(
+      Effect.catchTag("ParseError", (error) =>
+        Effect.die(
+          new OAuthError({
+            message: "Failed to parse token response into a Token Schema",
+            cause: error,
+          })
+        )
+      )
+    );
   });
