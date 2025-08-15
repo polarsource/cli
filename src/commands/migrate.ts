@@ -1,7 +1,7 @@
 import { Command, Options, Prompt } from "@effect/cli";
-import { Effect } from "effect";
-import * as Migration from "../services/migrate";
+import { Console, Effect, type Redacted } from "effect";
 import * as LemonSqueezy from "../services/migration/lemonSqueezy";
+import * as OAuth from "../services/oauth";
 
 const migrationProviders = [
   { value: "lemonSqueezy", title: "Lemon Squeezy" },
@@ -11,12 +11,31 @@ const migrationProviders = [
 
 export const migrate = Command.make("migrate", {}, () =>
   Effect.gen(function* () {
-    const selectedProvider = yield* Prompt.select({
+    const oauth = yield* OAuth.OAuth;
+    const isAuthenticated = yield* oauth.isAuthenticated("production");
+
+    let accessToken: Redacted.Redacted<string>;
+
+    if (!isAuthenticated) {
+      accessToken = yield* oauth.login("production");
+    } else {
+      accessToken = yield* oauth.getAccessToken("production");
+    }
+
+    const selectedProviderPrompt = Prompt.select({
       message: "Select Migration Provider",
       choices: migrationProviders,
-    }).pipe(Prompt.run);
+    });
 
-    const apiKey = yield* Prompt.text({
+    const entitiesToMigratePrompt = Prompt.multiSelect({
+      message: "Select Entities to Migrate",
+      choices: [
+        { value: "products", title: "Products" },
+        { value: "customers", title: "Customers" },
+      ],
+    });
+
+    const apiKeyPrompt = Prompt.text({
       message: "Enter the API Key",
       validate: (value) => {
         if (value.length === 0) {
@@ -25,19 +44,27 @@ export const migrate = Command.make("migrate", {}, () =>
 
         return Effect.succeed(value);
       },
-    }).pipe(Prompt.run);
-
-    yield* Effect.log(selectedProvider, apiKey);
-
-    const provider = yield* resolveProvider(selectedProvider, apiKey);
-
-    const migration = yield* Effect.gen(function* () {
-      const client = yield* Migration.Migration;
-      const products = yield* client.products(provider);
-      return products;
     });
 
-    yield* Effect.log(migration);
+    const [selectedProvider, entitiesToMigrate, apiKey] = yield* Prompt.all([
+      selectedProviderPrompt,
+      entitiesToMigratePrompt,
+      apiKeyPrompt,
+    ]).pipe(Prompt.run);
+
+    const provider = yield* resolveProvider(selectedProvider, apiKey);
+    const entities = yield* Effect.all(
+      entitiesToMigrate.map((entity) => {
+        switch (entity) {
+          case "products":
+            return provider.use((client) => client.listProducts());
+          case "customers":
+            return provider.use((client) => client.listCustomers());
+        }
+      })
+    );
+
+    yield* Console.log(entities);
   })
 );
 
@@ -50,7 +77,8 @@ const resolveProvider = (
   switch (provider) {
     case "lemonSqueezy":
       return LemonSqueezy.make(apiKey);
+
     default:
-      return Effect.die("Invalid provider");
+      return Effect.die("Unsupported Migration Provider");
   }
 };

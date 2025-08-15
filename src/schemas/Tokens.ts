@@ -4,20 +4,19 @@ import { Schema } from "effect";
 export const TokenScope = Schema.Array(Schema.Literal(...Object.values(Scope)));
 
 export const Token = Schema.Struct({
-  token: Schema.String,
-  refreshToken: Schema.String,
+  token: Schema.Redacted(Schema.String),
+  refreshToken: Schema.Redacted(Schema.String),
   expiresIn: Schema.DurationFromMillis,
+  expiresAt: Schema.Date,
   scope: TokenScope,
   server: Schema.Literal("production", "sandbox"),
 });
 
 export type Token = Schema.Schema.Type<typeof Token>;
 
-export const Tokens = Schema.partial(
-  Schema.Struct({
-    production: Token,
-    sandbox: Token,
-  })
-);
+export const Tokens = Schema.Struct({
+  production: Schema.optional(Token),
+  sandbox: Schema.optional(Token),
+});
 
 export type Tokens = Schema.Schema.Type<typeof Tokens>;

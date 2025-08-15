@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { FileSystem, Path } from "@effect/platform";
 import { NodeFileSystem } from "@effect/platform-node";
-import { Context, Data, Effect, Layer, Logger, LogLevel, Schema } from "effect";
+import { Context, Data, Effect, Layer, Redacted, Schema } from "effect";
 import open from "open";
 import os from "os";
 import { Token, Tokens } from "../schemas/Tokens";
@@ -49,8 +49,17 @@ export class OAuth extends Context.Tag("OAuth")<OAuth, OAuthImpl>() {}
 interface OAuthImpl {
   login: (
     server: "production" | "sandbox"
-  ) => Effect.Effect<string, OAuthError, never>;
+  ) => Effect.Effect<Redacted.Redacted<string>, OAuthError, never>;
+  refresh: (token: Token) => Effect.Effect<Token, OAuthError, never>;
+  isAuthenticated: (
+    server: "production" | "sandbox"
+  ) => Effect.Effect<boolean, OAuthError, never>;
+  getAccessToken: (
+    server: "production" | "sandbox"
+  ) => Effect.Effect<Redacted.Redacted<string>, OAuthError, never>;
 }
+
+const OAuthRequirementsLayer = Layer.mergeAll(NodeFileSystem.layer, Path.layer);
 
 export const make = Effect.gen(function* () {
   return OAuth.of({
@@ -58,11 +67,44 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const token = yield* getAccessToken(server);
         const savedToken = yield* saveToken(token);
+
         return savedToken.token;
       }).pipe(
-        Effect.provide(NodeFileSystem.layer),
-        Effect.provide(Path.layer),
-        Logger.withMinimumLogLevel(LogLevel.Debug),
+        Effect.provide(OAuthRequirementsLayer),
+        Effect.catchAll(Effect.die)
+      ),
+    refresh: (token) =>
+      Effect.gen(function* () {
+        const refreshedToken = yield* refreshAccessToken(token);
+        return yield* saveToken(refreshedToken);
+      }).pipe(
+        Effect.provide(OAuthRequirementsLayer),
+        Effect.catchAll(Effect.die)
+      ),
+    isAuthenticated: (server) =>
+      Effect.gen(function* () {
+        const token = yield* readTokenFile;
+        const tokenExpired =
+          (token[server]?.expiresAt ?? new Date()) < new Date();
+
+        return !tokenExpired;
+      }).pipe(
+        Effect.provide(OAuthRequirementsLayer),
+        Effect.catchAll(Effect.die)
+      ),
+    getAccessToken: (server) =>
+      Effect.gen(function* () {
+        const token = yield* readTokenFile;
+
+        if (!token[server]) {
+          throw new OAuthError({
+            message: "No access token found for the selected server",
+          });
+        }
+
+        return token[server].token;
+      }).pipe(
+        Effect.provide(OAuthRequirementsLayer),
         Effect.catchAll(Effect.die)
       ),
   });
@@ -72,6 +114,7 @@ export const layer = Layer.scoped(OAuth, make);
 
 const tokenFilePath = Effect.gen(function* () {
   const path = yield* Path.Path;
+
   return path.join(os.homedir(), ".polar", "tokens.json");
 });
 
@@ -111,7 +154,6 @@ const readTokenFile = Effect.gen(function* () {
 
   return yield* fileSystem.readFile(filePath).pipe(
     Effect.map((buffer) => new TextDecoder().decode(buffer)),
-    Effect.map((json) => JSON.parse(json)),
     Schema.decodeUnknown(Tokens),
     Effect.catchAll(Effect.die)
   );
@@ -213,6 +255,103 @@ const getLoginResult = (
     return [code, state];
   });
 
+const refreshAccessToken = (token: Token) =>
+  Effect.gen(function* () {
+    const refreshToken = token.refreshToken;
+
+    if (!refreshToken) {
+      return yield* Effect.fail(
+        new OAuthError({
+          message: "No refresh token found",
+        })
+      );
+    }
+
+    let body = "grant_type=refresh_token";
+    body += `&client_id=${encodeURIComponent(
+      token.server === "production" ? PRODUCTION_CLIENT_ID : SANDBOX_CLIENT_ID
+    )}`;
+    body += `&refresh_token=${encodeURIComponent(
+      Redacted.value(refreshToken)
+    )}`;
+    body += `&scope=${encodeURIComponent(config.scopes.join(" "))}`;
+
+    console.log(body);
+
+    const response = yield* Effect.tryPromise({
+      try: () =>
+        fetch(
+          token.server === "production"
+            ? PRODUCTION_TOKEN_URL
+            : SANDBOX_TOKEN_URL,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body,
+          }
+        ),
+      catch: (error) =>
+        new OAuthError({
+          message: "Failed to refresh access token",
+          cause: error,
+        }),
+    });
+
+    if (response.status >= 400) {
+      const details = yield* Effect.tryPromise({
+        try: () => response.text(),
+        catch: (error) =>
+          new OAuthError({
+            message: "Failed to get response text",
+            cause: error,
+          }),
+      });
+
+      return yield* Effect.fail(
+        new OAuthError({
+          message: `Problem encountered refreshing the access token: ${response.status}, ${details}`,
+        })
+      );
+    }
+
+    const data = yield* Effect.tryPromise({
+      try: () =>
+        response.json() as Promise<{
+          access_token: string;
+          token_type: "Bearer";
+          expires_in: number;
+          refresh_token: string | null;
+          scope: string;
+          id_token: string;
+        }>,
+      catch: (error) =>
+        new OAuthError({
+          message: "Failed to redeem code for access token",
+          cause: error,
+        }),
+    });
+
+    return yield* Schema.decodeUnknown(Token)({
+      token: data.access_token,
+      refreshToken: data.refresh_token,
+      expiresIn: data.expires_in,
+      expiresAt: new Date(Date.now() + data.expires_in).toISOString(),
+      scope: data.scope.split(" "),
+      server: token.server,
+    }).pipe(
+      Effect.catchTag("ParseError", (error) =>
+        Effect.die(
+          new OAuthError({
+            message: "Failed to parse token response into a Token Schema",
+            cause: error,
+          })
+        )
+      )
+    );
+  });
+
 const redeemCodeForAccessToken = (
   server: "production" | "sandbox",
   responseUrl: string,
@@ -254,7 +393,15 @@ const redeemCodeForAccessToken = (
     });
 
     if (response.status >= 400) {
-      const details = response.text();
+      const details = yield* Effect.tryPromise({
+        try: () => response.text(),
+        catch: (error) =>
+          new OAuthError({
+            message: "Failed to get response text",
+            cause: error,
+          }),
+      });
+
       return yield* Effect.fail(
         new OAuthError({
           message: `Problem encountered redeeming the code for tokens: ${response.status}, ${details}`,
@@ -283,6 +430,7 @@ const redeemCodeForAccessToken = (
       token: data.access_token,
       refreshToken: data.refresh_token,
       expiresIn: data.expires_in,
+      expiresAt: new Date(Date.now() + data.expires_in).toISOString(),
       scope: data.scope.split(" "),
       server,
     }).pipe(
