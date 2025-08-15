@@ -122,31 +122,31 @@ const saveToken = (token: Token) =>
     return yield* writeToTokenFile(token).pipe(Effect.map(() => token));
   });
 
-const getAccessToken = (mode: "production" | "sandbox") =>
+const getAccessToken = (server: "production" | "sandbox") =>
   Effect.gen(function* () {
     const codeVerifier = yield* generateRandomString;
     const codeChallenge = yield* generateHash(codeVerifier);
     const state = yield* generateRandomString;
     const authorizationUrl = yield* buildAuthorizationUrl(
-      mode,
+      server,
       state,
       codeChallenge
     );
 
     const accessToken = yield* Effect.async<Token, OAuthError>((resume) => {
-      let server: Server | null;
+      let httpServer: Server | null;
 
-      server = createServer((request, response) => {
-        if (server != null) {
+      httpServer = createServer((request, response) => {
+        if (httpServer != null) {
           // Complete the incoming HTTP request when a login response is received
           response.write("Login completed for the console client ...");
           response.end();
-          server.close();
-          server = null;
+          httpServer.close();
+          httpServer = null;
 
           resume(
             redeemCodeForAccessToken(
-              mode,
+              server,
               request.url ?? "",
               state,
               codeVerifier
@@ -155,7 +155,7 @@ const getAccessToken = (mode: "production" | "sandbox") =>
         }
       });
 
-      server?.listen(3333, () => {
+      httpServer?.listen(3333, () => {
         open(authorizationUrl);
       });
     });
