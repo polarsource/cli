@@ -70,6 +70,7 @@ export const make = Effect.gen(function* () {
 
         return savedToken.token;
       }).pipe(
+        Effect.scoped,
         Effect.provide(OAuthRequirementsLayer),
         Effect.catchAll(Effect.die)
       ),
@@ -175,16 +176,24 @@ const getAccessToken = (server: "production" | "sandbox") =>
       codeChallenge
     );
 
-    const accessToken = yield* Effect.async<Token, OAuthError>((resume) => {
-      let httpServer: Server | null;
+    let httpServer: Server | null;
 
+    // Close the HTTP server when the effect finalizes
+    yield* Effect.addFinalizer(() => {
+      if (httpServer != null) {
+        httpServer.close();
+        httpServer = null;
+      }
+
+      return Effect.logDebug("Temporary HTTP Server Closed");
+    });
+
+    const accessToken = yield* Effect.async<Token, OAuthError>((resume) => {
       httpServer = createServer((request, response) => {
         if (httpServer != null) {
           // Complete the incoming HTTP request when a login response is received
           response.write("Login completed for the console client ...");
           response.end();
-          httpServer.close();
-          httpServer = null;
 
           resume(
             redeemCodeForAccessToken(
