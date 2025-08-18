@@ -4,11 +4,13 @@ import path from "node:path";
 import { FileSystem, Path } from "@effect/platform";
 import type { PlatformError } from "@effect/platform/Error";
 import { NodeFileSystem } from "@effect/platform-node";
+import type { TokenResponse } from "@polar-sh/sdk/models/components/tokenresponse.js";
 import { Context, Data, Effect, Layer, Redacted, Schema } from "effect";
 import type { ParseError } from "effect/ParseResult";
 import open from "open";
 import os from "os";
 import { Token, Tokens } from "../schemas/Tokens";
+import type { KeysToSnakeCase } from "../types";
 
 const SANDBOX_CLIENT_ID = "polar_ci_KTj3Pfw3PE54dsjgcjVT6w";
 const PRODUCTION_CLIENT_ID = "polar_ci_gBnJ_Yv_uSGm5mtoPa2cCA";
@@ -209,7 +211,7 @@ const getAccessToken = (server: "production" | "sandbox") =>
 
     // Close the HTTP server when the effect finalizes
     yield* Effect.addFinalizer(() => {
-      if (httpServer != null) {
+      if (httpServer !== null) {
         httpServer.close();
         httpServer = null;
       }
@@ -219,7 +221,7 @@ const getAccessToken = (server: "production" | "sandbox") =>
 
     const accessToken = yield* Effect.async<Token, OAuthError>((resume) => {
       httpServer = createServer((request, response) => {
-        if (httpServer != null) {
+        if (httpServer !== null) {
           // Complete the incoming HTTP request when a login response is received
           response.write("Login completed for the console client ...");
           response.end();
@@ -257,19 +259,24 @@ const buildAuthorizationUrl = (
   codeChallenge: string
 ) =>
   Effect.sync(() => {
-    let url =
+    const baseUrl =
       mode === "production"
         ? PRODUCTION_AUTHORIZATION_URL
         : SANDBOX_AUTHORIZATION_URL;
-    url += `?client_id=${encodeURIComponent(
-      mode === "production" ? PRODUCTION_CLIENT_ID : SANDBOX_CLIENT_ID
-    )}`;
-    url += `&redirect_uri=${encodeURIComponent(config.redirectUrl)}`;
-    url += "&response_type=code";
-    url += `&scope=${encodeURIComponent(config.scopes.join(" "))}`;
-    url += `&state=${encodeURIComponent(state)}`;
-    url += `&code_challenge=${encodeURIComponent(codeChallenge)}`;
-    url += "&code_challenge_method=S256";
+    const clientId =
+      mode === "production" ? PRODUCTION_CLIENT_ID : SANDBOX_CLIENT_ID;
+
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: config.redirectUrl,
+      response_type: "code",
+      scope: config.scopes.join(" "),
+      state,
+      code_challenge: codeChallenge,
+      code_challenge_method: "S256",
+    });
+
+    const url = `${baseUrl}?${params.toString()}`;
 
     return url;
   });
@@ -304,17 +311,15 @@ const refreshAccessToken = (token: Token) =>
         })
       );
     }
-
-    let body = "grant_type=refresh_token";
-    body += `&client_id=${encodeURIComponent(
-      token.server === "production" ? PRODUCTION_CLIENT_ID : SANDBOX_CLIENT_ID
-    )}`;
-    body += `&refresh_token=${encodeURIComponent(
-      Redacted.value(refreshToken)
-    )}`;
-    body += `&scope=${encodeURIComponent(config.scopes.join(" "))}`;
-
-    console.log(body);
+    const params = new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id:
+        token.server === "production"
+          ? PRODUCTION_CLIENT_ID
+          : SANDBOX_CLIENT_ID,
+      refresh_token: Redacted.value(refreshToken),
+      scope: config.scopes.join(" "),
+    });
 
     const response = yield* Effect.tryPromise({
       try: () =>
@@ -327,7 +332,7 @@ const refreshAccessToken = (token: Token) =>
             headers: {
               "Content-Type": "application/x-www-form-urlencoded",
             },
-            body,
+            body: params.toString(),
           }
         ),
       catch: (error) =>
@@ -355,15 +360,7 @@ const refreshAccessToken = (token: Token) =>
     }
 
     const data = yield* Effect.tryPromise({
-      try: () =>
-        response.json() as Promise<{
-          access_token: string;
-          token_type: "Bearer";
-          expires_in: number;
-          refresh_token: string | null;
-          scope: string;
-          id_token: string;
-        }>,
+      try: () => response.json() as Promise<KeysToSnakeCase<TokenResponse>>,
       catch: (error) =>
         new OAuthError({
           message: "Failed to redeem code for access token",
@@ -403,13 +400,14 @@ const redeemCodeForAccessToken = (
       throw new Error("An invalid authorization response state was received");
     }
 
-    let body = "grant_type=authorization_code";
-    body += `&client_id=${encodeURIComponent(
-      server === "production" ? PRODUCTION_CLIENT_ID : SANDBOX_CLIENT_ID
-    )}`;
-    body += `&redirect_uri=${encodeURIComponent(config.redirectUrl)}`;
-    body += `&code=${encodeURIComponent(code)}`;
-    body += `&code_verifier=${encodeURIComponent(codeVerifier)}`;
+    const params = new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id:
+        server === "production" ? PRODUCTION_CLIENT_ID : SANDBOX_CLIENT_ID,
+      redirect_uri: config.redirectUrl,
+      code,
+      code_verifier: codeVerifier,
+    });
 
     const response = yield* Effect.tryPromise({
       try: () =>
@@ -420,7 +418,7 @@ const redeemCodeForAccessToken = (
             headers: {
               "Content-Type": "application/x-www-form-urlencoded",
             },
-            body,
+            body: params.toString(),
           }
         ),
       catch: (error) =>
@@ -448,15 +446,7 @@ const redeemCodeForAccessToken = (
     }
 
     const data = yield* Effect.tryPromise({
-      try: () =>
-        response.json() as Promise<{
-          access_token: string;
-          token_type: "Bearer";
-          expires_in: number;
-          refresh_token: string | null;
-          scope: string;
-          id_token: string;
-        }>,
+      try: () => response.json() as Promise<KeysToSnakeCase<TokenResponse>>,
       catch: (error) =>
         new OAuthError({
           message: "Failed to redeem code for access token",
