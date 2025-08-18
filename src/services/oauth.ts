@@ -2,11 +2,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { FileSystem, Path } from "@effect/platform";
-import type { PlatformError } from "@effect/platform/Error";
 import { NodeFileSystem } from "@effect/platform-node";
 import type { TokenResponse } from "@polar-sh/sdk/models/components/tokenresponse.js";
 import { Context, Data, Effect, Layer, Redacted, Schema } from "effect";
-import type { ParseError } from "effect/ParseResult";
 import open from "open";
 import os from "os";
 import { Token, Tokens } from "../schemas/Tokens";
@@ -43,160 +41,7 @@ const config = {
   redirectUrl: "http://127.0.0.1:3333/oauth/callback",
 };
 
-export class OAuthError extends Data.TaggedError("OAuthError")<{
-  message: string;
-  cause?: unknown;
-}> {}
-
-export class OAuth extends Context.Tag("OAuth")<OAuth, OAuthImpl>() {}
-
-interface OAuthImpl {
-  login: (
-    server: "production" | "sandbox"
-  ) => Effect.Effect<
-    Redacted.Redacted<string>,
-    OAuthError | PlatformError | ParseError,
-    never
-  >;
-  refresh: (
-    token: Token
-  ) => Effect.Effect<Token, OAuthError | PlatformError | ParseError, never>;
-  isAuthenticated: (
-    server: "production" | "sandbox"
-  ) => Effect.Effect<boolean, OAuthError | PlatformError | ParseError, never>;
-  getAccessToken: (
-    server: "production" | "sandbox"
-  ) => Effect.Effect<
-    Redacted.Redacted<string>,
-    OAuthError | PlatformError | ParseError,
-    never
-  >;
-}
-
-const OAuthRequirementsLayer = Layer.mergeAll(NodeFileSystem.layer, Path.layer);
-
-export const make = Effect.gen(function* () {
-  return OAuth.of({
-    login: (server) =>
-      Effect.gen(function* () {
-        const token = yield* getAccessToken(server);
-        const savedToken = yield* saveToken(token);
-
-        return savedToken.token;
-      }).pipe(Effect.scoped, Effect.provide(OAuthRequirementsLayer)),
-    refresh: (token) =>
-      Effect.gen(function* () {
-        const refreshedToken = yield* refreshAccessToken(token);
-        return yield* saveToken(refreshedToken);
-      }).pipe(Effect.provide(OAuthRequirementsLayer)),
-    isAuthenticated: (server) =>
-      Effect.gen(function* () {
-        const tokens = yield* readTokenFile;
-
-        if (!tokens) {
-          return false;
-        }
-
-        const serverToken = tokens[server];
-
-        if (!serverToken) {
-          return false;
-        }
-
-        const tokenExpired = serverToken.expiresAt < new Date();
-
-        return !tokenExpired;
-      }).pipe(Effect.provide(OAuthRequirementsLayer)),
-    getAccessToken: (server) =>
-      Effect.gen(function* () {
-        const token = yield* readTokenFile;
-
-        if (!token || !token[server]) {
-          return yield* Effect.fail(
-            new OAuthError({
-              message: "No access token found for the selected server",
-            })
-          );
-        }
-
-        return token[server].token;
-      }).pipe(Effect.provide(OAuthRequirementsLayer)),
-  });
-});
-
-export const layer = Layer.scoped(OAuth, make);
-
-const tokenFilePath = Effect.gen(function* () {
-  const path = yield* Path.Path;
-
-  return path.join(os.homedir(), ".polar", "tokens.json");
-});
-
-const ensureTokenFile = Effect.gen(function* () {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const filePath = yield* tokenFilePath;
-
-  return yield* Effect.orElse(fileSystem.access(filePath), () =>
-    fileSystem
-      .makeDirectory(path.dirname(filePath), {
-        recursive: true,
-      })
-      .pipe(
-        Effect.andThen(
-          fileSystem.writeFile(filePath, new TextEncoder().encode("{}"))
-        )
-      )
-  );
-});
-
-const writeToTokenFile = (token: Token) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const filePath = yield* tokenFilePath;
-
-    yield* Effect.logDebug("Writing token to file...");
-
-    const currentTokens = yield* readTokenFile;
-
-    const mergedTokens = Tokens.make({
-      ...currentTokens,
-      [token.server]: token,
-    });
-
-    return yield* ensureTokenFile.pipe(
-      Effect.andThen(() =>
-        Schema.encode(Tokens)(mergedTokens).pipe(
-          Effect.map((encoded) =>
-            new TextEncoder().encode(JSON.stringify(encoded))
-          ),
-          Effect.andThen((encoded) => fileSystem.writeFile(filePath, encoded))
-        )
-      )
-    );
-  });
-
-const readTokenFile = Effect.gen(function* () {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const filePath = yield* tokenFilePath;
-
-  yield* Effect.logDebug("Reading token file...");
-
-  return yield* ensureTokenFile.pipe(
-    Effect.flatMap(() => fileSystem.readFile(filePath)),
-    Effect.map((buffer) => new TextDecoder().decode(buffer)),
-    Effect.map(JSON.parse),
-    Effect.map(Schema.decodeUnknownSync(Tokens))
-  );
-});
-
-const saveToken = (token: Token) =>
-  Effect.gen(function* () {
-    yield* Effect.logDebug("Saving token to file...");
-
-    return yield* writeToTokenFile(token).pipe(Effect.map(() => token));
-  });
-
-const getAccessToken = (server: "production" | "sandbox") =>
+const captureAccessTokenFromHTTPServer = (server: "production" | "sandbox") =>
   Effect.gen(function* () {
     const codeVerifier = yield* generateRandomString;
     const codeChallenge = yield* generateHash(codeVerifier);
@@ -243,6 +88,190 @@ const getAccessToken = (server: "production" | "sandbox") =>
     });
 
     return accessToken;
+  });
+
+export class OAuthError extends Data.TaggedError("OAuthError")<{
+  message: string;
+  cause?: unknown;
+}> {}
+
+export class OAuth extends Context.Tag("OAuth")<OAuth, OAuthImpl>() {}
+
+interface OAuthImpl {
+  login: (
+    server: "production" | "sandbox"
+  ) => Effect.Effect<Token, OAuthError, never>;
+  refresh: (token: Token) => Effect.Effect<Token, OAuthError, never>;
+  isAuthenticated: (
+    server: "production" | "sandbox"
+  ) => Effect.Effect<boolean, OAuthError, never>;
+  getAccessToken: (
+    server: "production" | "sandbox"
+  ) => Effect.Effect<Token, OAuthError, never>;
+  resolveAccessToken: (
+    server: "production" | "sandbox"
+  ) => Effect.Effect<Token, OAuthError, never>;
+}
+
+const OAuthRequirementsLayer = Layer.mergeAll(NodeFileSystem.layer, Path.layer);
+
+export const make = Effect.gen(function* () {
+  const getAccessToken = (server: "production" | "sandbox") =>
+    Effect.gen(function* () {
+      const token = yield* readTokenFile;
+
+      if (!token || !token[server]) {
+        return yield* Effect.fail(
+          new OAuthError({
+            message: "No access token found for the selected server",
+          })
+        );
+      }
+
+      return token[server];
+    }).pipe(Effect.provide(OAuthRequirementsLayer));
+
+  const login = (server: "production" | "sandbox") =>
+    Effect.gen(function* () {
+      const token = yield* captureAccessTokenFromHTTPServer(server);
+      const savedToken = yield* saveToken(token);
+
+      return savedToken;
+    }).pipe(Effect.scoped, Effect.provide(OAuthRequirementsLayer));
+
+  const refresh = (token: Token) =>
+    Effect.gen(function* () {
+      const refreshedToken = yield* refreshAccessToken(token);
+      return yield* saveToken(refreshedToken);
+    }).pipe(Effect.provide(OAuthRequirementsLayer));
+
+  const isAuthenticated = (server: "production" | "sandbox") =>
+    Effect.gen(function* () {
+      const tokens = yield* readTokenFile;
+
+      if (!tokens) {
+        return false;
+      }
+
+      const serverToken = tokens[server];
+
+      if (!serverToken) {
+        return false;
+      }
+
+      const tokenExpired = serverToken.expiresAt < new Date();
+
+      return !tokenExpired;
+    }).pipe(Effect.provide(OAuthRequirementsLayer));
+
+  const resolveAccessToken = (server: "production" | "sandbox") =>
+    Effect.gen(function* () {
+      const authenticated = yield* isAuthenticated(server);
+
+      if (!authenticated) {
+        return yield* login(server);
+      }
+
+      return yield* getAccessToken(server);
+    }).pipe(Effect.provide(OAuthRequirementsLayer));
+
+  return OAuth.of({
+    login,
+    refresh,
+    isAuthenticated,
+    getAccessToken,
+    resolveAccessToken,
+  });
+});
+
+export const layer = Layer.scoped(OAuth, make);
+
+const tokenFilePath = Effect.gen(function* () {
+  const path = yield* Path.Path;
+  return path.join(os.homedir(), ".polar", "tokens.json");
+});
+
+const ensureTokenFile = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const filePath = yield* tokenFilePath;
+
+  return yield* Effect.orElse(fileSystem.access(filePath), () =>
+    fileSystem
+      .makeDirectory(path.dirname(filePath), {
+        recursive: true,
+      })
+      .pipe(Effect.andThen(fileSystem.writeFileString(filePath, "{}")))
+  ).pipe(
+    Effect.catchAll((error) =>
+      Effect.fail(
+        new OAuthError({
+          message: "Failed to ensure token file exists",
+          cause: error,
+        })
+      )
+    )
+  );
+});
+
+const writeToTokenFile = (token: Token) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const filePath = yield* tokenFilePath;
+
+    yield* Effect.logDebug("Writing token to file...");
+
+    const currentTokens = yield* readTokenFile;
+
+    const mergedTokens = Tokens.make({
+      ...currentTokens,
+      [token.server]: token,
+    });
+
+    return yield* ensureTokenFile.pipe(
+      Effect.andThen(() =>
+        Schema.encode(Tokens)(mergedTokens).pipe(
+          Effect.map((encoded) =>
+            new TextEncoder().encode(JSON.stringify(encoded))
+          ),
+          Effect.andThen((encoded) => fileSystem.writeFile(filePath, encoded))
+        )
+      ),
+      Effect.catchAll((error) =>
+        Effect.fail(
+          new OAuthError({
+            message: "Failed to write token to file",
+            cause: error,
+          })
+        )
+      )
+    );
+  });
+
+const readTokenFile = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const filePath = yield* tokenFilePath;
+
+  yield* Effect.logDebug("Reading token file...");
+
+  return yield* ensureTokenFile.pipe(
+    Effect.flatMap(() => fileSystem.readFileString(filePath)),
+    Effect.flatMap(Schema.decode(Schema.parseJson(Tokens))),
+    Effect.catchAll((error) =>
+      Effect.fail(
+        new OAuthError({
+          message: "Failed to read token file",
+          cause: error,
+        })
+      )
+    )
+  );
+});
+
+const saveToken = (token: Token) =>
+  Effect.gen(function* () {
+    yield* Effect.logDebug("Saving token to file...");
+
+    return yield* writeToTokenFile(token).pipe(Effect.map(() => token));
   });
 
 const generateRandomString = Effect.sync(() => randomBytes(48).toString("hex"));

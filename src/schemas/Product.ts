@@ -1,10 +1,9 @@
 import { Schema } from "effect";
 
-export const Product = Schema.Struct({
-  id: Schema.String,
+export const ProductCreate = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
   price: Schema.Number,
 });
 
-export type Product = Schema.Schema.Type<typeof Product>;
+export type ProductCreate = Schema.Schema.Type<typeof ProductCreate>;

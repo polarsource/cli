@@ -1,7 +1,8 @@
-import { Context, Data, Effect, Layer, pipe, Schema } from "effect";
-import { Customer } from "../schemas/Customer";
-import { Product } from "../schemas/Product";
-import type * as LemonSqueezy from "./migration/lemonSqueezy";
+import { Context, Data, Effect, Layer, Schema } from "effect";
+import { CustomerCreate } from "../schemas/Customer";
+import type * as LemonSqueezy from "./migration/providers/lemonSqueezy";
+import type * as OAuth from "./oauth";
+import * as Polar from "./polar";
 
 export class MigrationError extends Data.TaggedError("MigrationError")<{
   message: string;
@@ -12,16 +13,16 @@ export interface MigrationImpl {
   products: (
     provider: LemonSqueezy.LemonSqueezyImpl
   ) => Effect.Effect<
-    readonly Product[],
-    LemonSqueezy.LemonSqueezyError | MigrationError,
-    never
+    void,
+    LemonSqueezy.LemonSqueezyError | Polar.PolarError | OAuth.OAuthError,
+    Polar.Polar | OAuth.OAuth
   >;
   customers: (
     provider: LemonSqueezy.LemonSqueezyImpl
   ) => Effect.Effect<
-    readonly Customer[],
-    LemonSqueezy.LemonSqueezyError | MigrationError,
-    never
+    void,
+    LemonSqueezy.LemonSqueezyError | Polar.PolarError | OAuth.OAuthError,
+    Polar.Polar | OAuth.OAuth
   >;
 }
 
@@ -34,50 +35,45 @@ export const make = Effect.gen(function* () {
   return Migration.of({
     products: (provider) =>
       Effect.gen(function* () {
-        const providerProducts = yield* provider
-          .use((client) =>
-            client.listProducts().then(
-              (query) =>
-                query.data?.data.map((product) => ({
-                  id: product.id,
-                  name: product.attributes.name,
-                  description: product.attributes.description,
-                  price: product.attributes.price,
-                })) ?? []
-            )
-          )
-          .pipe(Effect.catchAll((error) => Effect.die(error)));
+        const polar = yield* Polar.Polar;
+        const providerProducts = provider.products;
 
-        return yield* pipe(
-          providerProducts,
-          Schema.decodeUnknown(Schema.Array(Product)),
-          Effect.catchTag(
-            "ParseError",
-            (error) =>
-              new MigrationError({
-                message: "Failed to parse products",
-                cause: error,
-              })
+        yield* providerProducts.pipe(
+          Effect.flatMap((products) =>
+            Effect.all(
+              products.map((product) =>
+                polar.use((client) => client.products.create(product))
+              ),
+              {
+                concurrency: 10,
+              }
+            )
+          ),
+          Effect.tap((products) =>
+            Effect.logDebug(`${products.length} products migrated`)
           )
         );
+
+        yield* Effect.log("asd");
       }),
     customers: (provider) =>
       Effect.gen(function* () {
-        const providerCustomers = yield* provider.use((client) =>
-          client.listCustomers().then((query) => query.data?.data ?? [])
-        );
+        const polar = yield* Polar.Polar;
+        const providerCustomers = provider.customers;
 
-        return yield* pipe(
-          providerCustomers,
-          Schema.decodeUnknown(Schema.Array(Customer)),
-          Effect.catchTag(
-            "ParseError",
-            (error) =>
-              new MigrationError({
-                message: "Failed to parse customers",
-                cause: error,
-              })
-          )
+        yield* providerCustomers.pipe(
+          Effect.flatMap(Schema.encode(Schema.Array(CustomerCreate))),
+          Effect.flatMap((customers) =>
+            Effect.all(
+              customers.map((customer) =>
+                polar.use((client) => client.customers.create(customer))
+              ),
+              {
+                concurrency: 10,
+              }
+            )
+          ),
+          Effect.catchTag("ParseError", Effect.die)
         );
       }),
   });
