@@ -1,7 +1,7 @@
 import {
   getAuthenticatedUser,
   type ListCustomers,
-  type ListProducts,
+  type ListVariants,
   lemonSqueezySetup,
   listCustomers,
   listDiscounts,
@@ -10,6 +10,10 @@ import {
   listStores,
   listVariants,
 } from "@lemonsqueezy/lemonsqueezy.js";
+import type { ProductPriceCustomCreate } from "@polar-sh/sdk/models/components/productpricecustomcreate.js";
+import type { ProductPriceFixedCreate } from "@polar-sh/sdk/models/components/productpricefixedcreate.js";
+import type { ProductPriceFreeCreate } from "@polar-sh/sdk/models/components/productpricefreecreate.js";
+import type { SubscriptionRecurringInterval } from "@polar-sh/sdk/models/components/subscriptionrecurringinterval.js";
 import { Context, Data, Effect, Layer, Schema } from "effect";
 import { CustomerCreate } from "../../../schemas/Customer";
 import { ProductCreate } from "../../../schemas/Product";
@@ -54,12 +58,72 @@ const parseCustomers = (customers: LemonSqueezyFetchResponse<ListCustomers>) =>
       : undefined,
   })) ?? [];
 
-const parseProducts = (products: LemonSqueezyFetchResponse<ListProducts>) =>
-  products.data?.data?.map((product) => ({
-    name: product.attributes.name,
-    description: product.attributes.description,
-    price: product.attributes.price,
-  })) ?? [];
+const parseInterval = (
+  interval: ListVariants["data"][number]["attributes"]["interval"]
+): SubscriptionRecurringInterval | null => {
+  switch (interval) {
+    case "month":
+      return "month";
+    case "year":
+      return "year";
+    default:
+      return null;
+  }
+};
+
+const parseVariants = (variants: LemonSqueezyFetchResponse<ListVariants>[]) =>
+  variants.flatMap(
+    (variant) =>
+      variant.data?.data?.map((variant) => ({
+        name: variant.attributes.name,
+        description: variant.attributes.description,
+        prices: [parsePrice(variant)],
+        recurringInterval: parseInterval(variant.attributes.interval),
+      })) ?? []
+  );
+
+const parsePrice = (
+  variant: ListVariants["data"][number]
+):
+  | ProductPriceFixedCreate
+  | ProductPriceFreeCreate
+  | ProductPriceCustomCreate => {
+  const priceCurrency = "usd";
+  const priceAmount = variant.attributes.price;
+
+  if (priceAmount > 0) {
+    return {
+      amountType: "fixed",
+      priceAmount,
+      priceCurrency,
+    };
+  }
+
+  const payWhatYouWant = variant.attributes.pay_what_you_want;
+
+  if (payWhatYouWant) {
+    return {
+      amountType: "custom",
+      priceAmount,
+      priceCurrency,
+      minimumAmount:
+        variant.attributes.min_price < 50 ? 50 : variant.attributes.min_price,
+      presetAmount: variant.attributes.suggested_price,
+    } as ProductPriceCustomCreate;
+  }
+
+  if (priceAmount > 0) {
+    return {
+      amountType: "fixed",
+      priceAmount,
+      priceCurrency,
+    } as ProductPriceFixedCreate;
+  }
+
+  return {
+    amountType: "free",
+  };
+};
 
 export const make = (apiKey: string) =>
   Effect.gen(function* () {
@@ -87,7 +151,18 @@ export const make = (apiKey: string) =>
         )
       ),
       products: Effect.tryPromise({
-        try: () => client.listProducts(),
+        try: () =>
+          client.listProducts().then((products) =>
+            Promise.all(
+              products.data?.data?.map((product) =>
+                client.listVariants({
+                  filter: {
+                    productId: product.id,
+                  },
+                })
+              ) ?? []
+            )
+          ),
         catch: (error) => {
           throw new LemonSqueezyError({
             message: "Failed to list Lemon Squeezy products",
@@ -95,7 +170,7 @@ export const make = (apiKey: string) =>
           });
         },
       }).pipe(
-        Effect.map(parseProducts),
+        Effect.map(parseVariants),
         Effect.flatMap(Schema.decodeUnknown(Schema.Array(ProductCreate))),
         Effect.catchTag(
           "ParseError",
