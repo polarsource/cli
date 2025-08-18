@@ -3,7 +3,7 @@ import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Effect, Layer } from "effect";
 import { login } from "./commands/login";
 import { migrate } from "./commands/migrate";
-import * as Migration from "./services/migrate";
+import * as Migration from "./services/migration/migrate";
 import * as OAuth from "./services/oauth";
 
 const VERSION = "v1.0.0";

@@ -1,8 +1,8 @@
 import { Context, Data, Effect, Layer, Schema } from "effect";
-import { CustomerCreate } from "../schemas/Customer";
-import type * as LemonSqueezy from "./migration/providers/lemonSqueezy";
-import type * as OAuth from "./oauth";
-import * as Polar from "./polar";
+import { CustomerCreate } from "../../schemas/Customer";
+import type * as OAuth from "../oauth";
+import * as Polar from "../polar";
+import type * as LemonSqueezy from "./providers/lemonSqueezy";
 
 export class MigrationError extends Data.TaggedError("MigrationError")<{
   message: string;

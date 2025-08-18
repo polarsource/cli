@@ -1,6 +1,6 @@
 import { Command, Options, Prompt } from "@effect/cli";
 import { Effect } from "effect";
-import * as Migration from "../services/migrate";
+import * as Migration from "../services/migration/migrate";
 import * as LemonSqueezy from "../services/migration/providers/lemonSqueezy";
 import * as Polar from "../services/polar";
 
