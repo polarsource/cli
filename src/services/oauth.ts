@@ -2,8 +2,10 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { FileSystem, Path } from "@effect/platform";
+import type { PlatformError } from "@effect/platform/Error";
 import { NodeFileSystem } from "@effect/platform-node";
 import { Context, Data, Effect, Layer, Redacted, Schema } from "effect";
+import type { ParseError } from "effect/ParseResult";
 import open from "open";
 import os from "os";
 import { Token, Tokens } from "../schemas/Tokens";
@@ -49,14 +51,24 @@ export class OAuth extends Context.Tag("OAuth")<OAuth, OAuthImpl>() {}
 interface OAuthImpl {
   login: (
     server: "production" | "sandbox"
-  ) => Effect.Effect<Redacted.Redacted<string>, OAuthError, never>;
-  refresh: (token: Token) => Effect.Effect<Token, OAuthError, never>;
+  ) => Effect.Effect<
+    Redacted.Redacted<string>,
+    OAuthError | PlatformError | ParseError,
+    never
+  >;
+  refresh: (
+    token: Token
+  ) => Effect.Effect<Token, OAuthError | PlatformError | ParseError, never>;
   isAuthenticated: (
     server: "production" | "sandbox"
-  ) => Effect.Effect<boolean, OAuthError, never>;
+  ) => Effect.Effect<boolean, OAuthError | PlatformError | ParseError, never>;
   getAccessToken: (
     server: "production" | "sandbox"
-  ) => Effect.Effect<Redacted.Redacted<string>, OAuthError, never>;
+  ) => Effect.Effect<
+    Redacted.Redacted<string>,
+    OAuthError | PlatformError | ParseError,
+    never
+  >;
 }
 
 const OAuthRequirementsLayer = Layer.mergeAll(NodeFileSystem.layer, Path.layer);
@@ -69,45 +81,44 @@ export const make = Effect.gen(function* () {
         const savedToken = yield* saveToken(token);
 
         return savedToken.token;
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(OAuthRequirementsLayer),
-        Effect.catchAll(Effect.die)
-      ),
+      }).pipe(Effect.scoped, Effect.provide(OAuthRequirementsLayer)),
     refresh: (token) =>
       Effect.gen(function* () {
         const refreshedToken = yield* refreshAccessToken(token);
         return yield* saveToken(refreshedToken);
-      }).pipe(
-        Effect.provide(OAuthRequirementsLayer),
-        Effect.catchAll(Effect.die)
-      ),
+      }).pipe(Effect.provide(OAuthRequirementsLayer)),
     isAuthenticated: (server) =>
       Effect.gen(function* () {
-        const token = yield* readTokenFile;
-        const tokenExpired =
-          (token[server]?.expiresAt ?? new Date()) < new Date();
+        const tokens = yield* readTokenFile;
+
+        if (!tokens) {
+          return false;
+        }
+
+        const serverToken = tokens[server];
+
+        if (!serverToken) {
+          return false;
+        }
+
+        const tokenExpired = serverToken.expiresAt < new Date();
 
         return !tokenExpired;
-      }).pipe(
-        Effect.provide(OAuthRequirementsLayer),
-        Effect.catchAll(Effect.die)
-      ),
+      }).pipe(Effect.provide(OAuthRequirementsLayer)),
     getAccessToken: (server) =>
       Effect.gen(function* () {
         const token = yield* readTokenFile;
 
-        if (!token[server]) {
-          throw new OAuthError({
-            message: "No access token found for the selected server",
-          });
+        if (!token || !token[server]) {
+          return yield* Effect.fail(
+            new OAuthError({
+              message: "No access token found for the selected server",
+            })
+          );
         }
 
         return token[server].token;
-      }).pipe(
-        Effect.provide(OAuthRequirementsLayer),
-        Effect.catchAll(Effect.die)
-      ),
+      }).pipe(Effect.provide(OAuthRequirementsLayer)),
   });
 });
 
@@ -119,6 +130,23 @@ const tokenFilePath = Effect.gen(function* () {
   return path.join(os.homedir(), ".polar", "tokens.json");
 });
 
+const ensureTokenFile = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const filePath = yield* tokenFilePath;
+
+  return yield* Effect.orElse(fileSystem.access(filePath), () =>
+    fileSystem
+      .makeDirectory(path.dirname(filePath), {
+        recursive: true,
+      })
+      .pipe(
+        Effect.andThen(
+          fileSystem.writeFile(filePath, new TextEncoder().encode("{}"))
+        )
+      )
+  );
+});
+
 const writeToTokenFile = (token: Token) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -128,21 +156,19 @@ const writeToTokenFile = (token: Token) =>
 
     const currentTokens = yield* readTokenFile;
 
-    yield* fileSystem.access(filePath).pipe(
-      Effect.catchTag("SystemError", (_SystemError) => {
-        return fileSystem.makeDirectory(path.dirname(filePath), {
-          recursive: true,
-        });
-      })
-    );
+    const mergedTokens = Tokens.make({
+      ...currentTokens,
+      [token.server]: token,
+    });
 
-    return yield* fileSystem.writeFile(
-      filePath,
-      new TextEncoder().encode(
-        JSON.stringify({
-          ...currentTokens,
-          [token.server]: token,
-        })
+    return yield* ensureTokenFile.pipe(
+      Effect.andThen(() =>
+        Schema.encode(Tokens)(mergedTokens).pipe(
+          Effect.map((encoded) =>
+            new TextEncoder().encode(JSON.stringify(encoded))
+          ),
+          Effect.andThen((encoded) => fileSystem.writeFile(filePath, encoded))
+        )
       )
     );
   });
@@ -153,15 +179,18 @@ const readTokenFile = Effect.gen(function* () {
 
   yield* Effect.logDebug("Reading token file...");
 
-  return yield* fileSystem.readFile(filePath).pipe(
+  return yield* ensureTokenFile.pipe(
+    Effect.flatMap(() => fileSystem.readFile(filePath)),
     Effect.map((buffer) => new TextDecoder().decode(buffer)),
-    Schema.decodeUnknown(Tokens),
-    Effect.catchAll(Effect.die)
+    Effect.map(JSON.parse),
+    Effect.map(Schema.decodeUnknownSync(Tokens))
   );
 });
 
 const saveToken = (token: Token) =>
   Effect.gen(function* () {
+    yield* Effect.logDebug("Saving token to file...");
+
     return yield* writeToTokenFile(token).pipe(Effect.map(() => token));
   });
 

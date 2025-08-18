@@ -11,12 +11,12 @@ export const Token = Schema.Struct({
   scope: TokenScope,
   server: Schema.Literal("production", "sandbox"),
 });
-
 export type Token = Schema.Schema.Type<typeof Token>;
+export type TokenJSON = Schema.Schema.Encoded<typeof Token>;
 
 export const Tokens = Schema.Struct({
   production: Schema.optional(Token),
   sandbox: Schema.optional(Token),
 });
-
 export type Tokens = Schema.Schema.Type<typeof Tokens>;
+export type TokensJSON = Schema.Schema.Encoded<typeof Tokens>;
