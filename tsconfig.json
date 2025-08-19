@@ -3,8 +3,13 @@
   "compilerOptions": {
     "outDir": "dist",
     "skipLibCheck": true,
-    "module": "ESNext",
-    "moduleResolution": "bundler"
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "plugins": [
+      {
+        "name": "@effect/language-service"
+      }
+    ]
   },
   "include": ["src"]
 }

@@ -29,6 +29,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.1.4",
+    "@effect/language-service": "^0.35.2",
     "@sindresorhus/tsconfig": "^8.0.1",
     "@types/node": "^24.2.1",
     "tsup": "^8.5.0",
