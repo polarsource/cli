@@ -19,7 +19,7 @@ export const CreateProductPriceFree = Schema.mutable(
 export const CreateProductPriceFixed = Schema.mutable(
   Schema.Struct({
     amountType: Schema.Literal("fixed"),
-    priceCurrency: Schema.Literal("USD"),
+    priceCurrency: Schema.Literal("usd"),
     priceAmount: Schema.Number,
   })
 );

@@ -1,5 +1,6 @@
 import { Prompt } from "@effect/cli";
 import { Effect } from "effect";
+import type * as LemonSqueezy from "../services/migration/lemon/provider";
 
 const migrationProviders = [
   { value: "lemonSqueezy", title: "Lemon Squeezy" },
@@ -30,3 +31,16 @@ export const apiKeyPrompt = Prompt.text({
     return Effect.succeed(value);
   },
 });
+
+export const storePrompt = (provider: LemonSqueezy.LemonSqueezyImpl) =>
+  Effect.gen(function* () {
+    const stores = yield* provider.stores();
+
+    return yield* Prompt.select({
+      message: "Select Store to Migrate",
+      choices: stores.data.map((store) => ({
+        value: store.id,
+        title: store.attributes.name,
+      })),
+    });
+  });

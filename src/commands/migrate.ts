@@ -4,10 +4,16 @@ import {
   apiKeyPrompt,
   migrationPrompt,
   providerPrompt,
+  storePrompt,
 } from "../prompts/migration";
+import { organizationPrompt } from "../prompts/organizations";
+import {
+  MigrationContext,
+  MigrationDestination,
+  MigrationOrigin,
+} from "../schemas/Migration";
+import * as LemonSqueezy from "../services/migration/lemon/provider";
 import * as Migration from "../services/migration/migrate";
-import * as LemonSqueezy from "../services/migration/providers/lemonSqueezy";
-import * as Polar from "../services/polar";
 
 export const migrate = Command.make("migrate", {}, () =>
   Effect.gen(function* () {
@@ -18,24 +24,27 @@ export const migrate = Command.make("migrate", {}, () =>
 
     const migration = yield* Migration.Migration;
 
-    yield* migrationPrompt.pipe(
-      Prompt.run,
-      Effect.flatMap((entitiesToMigrate) =>
-        Effect.all(
-          {
-            products: entitiesToMigrate.includes("products")
-              ? migration.products(provider)
-              : Effect.succeed([]),
-            customers: entitiesToMigrate.includes("customers")
-              ? migration.customers(provider)
-              : Effect.succeed([]),
-          },
-          {
-            concurrency: "unbounded",
-          }
-        )
-      ),
-      Effect.provide(Polar.layer("production"))
+    const storeToMigrate = yield* storePrompt(provider);
+    const entitiesToMigrate = yield* migrationPrompt;
+    const organizationId = yield* organizationPrompt;
+
+    const migrationContext = MigrationContext.make({
+      from: MigrationOrigin.make(storeToMigrate),
+      to: MigrationDestination.make(organizationId),
+    });
+
+    yield* Effect.all(
+      {
+        products: entitiesToMigrate.includes("products")
+          ? migration.products(provider, migrationContext)
+          : Effect.succeed([]),
+        customers: entitiesToMigrate.includes("customers")
+          ? migration.customers(provider, migrationContext)
+          : Effect.succeed([]),
+      },
+      {
+        concurrency: "unbounded",
+      }
     );
   })
 );

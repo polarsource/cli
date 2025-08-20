@@ -1,5 +1,5 @@
 import { Prompt } from "@effect/cli";
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import { OrganizationCreate } from "../schemas/Organization";
 import * as Polar from "../services/polar";
 import { slugify } from "../utils";
@@ -42,7 +42,7 @@ const createNewOrganizationPrompt = Effect.gen(function* () {
   const name = yield* organizationNamePrompt;
   const slug = yield* organizationSlugPrompt(name);
 
-  const organizationCreate = yield* Schema.decode(OrganizationCreate)({
+  const organizationCreate = OrganizationCreate.make({
     name,
     slug,
   });
@@ -54,7 +54,7 @@ const createNewOrganizationPrompt = Effect.gen(function* () {
   return organization.id;
 });
 
-export const OrganizationPrompt = selectOrganizationPrompt.pipe(
+export const organizationPrompt = selectOrganizationPrompt.pipe(
   Effect.flatMap((organization) => {
     if (organization === "new") {
       return createNewOrganizationPrompt;

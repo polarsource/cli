@@ -1,10 +1,19 @@
 import { Schema } from "effect";
-import { Customer } from "./Customer";
-import { Product } from "./Product";
 
-export const Migration = Schema.Struct({
-  products: Schema.Array(Product),
-  customers: Schema.Array(Customer),
+export const MigrationOrigin = Schema.String.pipe(
+  Schema.brand("MigrationOrigin")
+);
+export type MigrationOrigin = Schema.Schema.Type<typeof MigrationOrigin>;
+
+export const MigrationDestination = Schema.String.pipe(
+  Schema.brand("MigrationDestination")
+);
+export type MigrationDestination = Schema.Schema.Type<
+  typeof MigrationDestination
+>;
+
+export const MigrationContext = Schema.Struct({
+  from: MigrationOrigin,
+  to: MigrationDestination,
 });
-
-export type Migration = Schema.Schema.Type<typeof Migration>;
+export type MigrationContext = Schema.Schema.Type<typeof MigrationContext>;
