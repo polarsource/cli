@@ -19,8 +19,8 @@ const cli = Command.run(mainCommand, {
 });
 
 const services = Layer.mergeAll(
-  Polar.layer("production"),
   OAuth.layer,
+  Polar.layer,
   Migration.layer,
   NodeContext.layer
 );

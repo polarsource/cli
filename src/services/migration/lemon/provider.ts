@@ -93,7 +93,7 @@ export const make = (apiKey: string) =>
               })
           )
         ),
-      products: (storeId: string) =>
+      products: (_storeId: string) =>
         Effect.tryPromise({
           try: async () => {
             return await fetchAllPages((pageNumber: number) =>
