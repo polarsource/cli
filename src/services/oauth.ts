@@ -21,11 +21,24 @@ const PRODUCTION_TOKEN_URL = "https://api.polar.sh/v1/oauth2/token";
 
 const config = {
   scopes: [
+    "web:read",
+    "web:write",
     "openid",
     "profile",
     "email",
-    "web:read",
-    "web:write",
+    "user:read",
+    "organizations:read",
+    "organizations:write",
+    "products:read",
+    "products:write",
+    "benefits:read",
+    "benefits:write",
+    "discounts:read",
+    "discounts:write",
+    "files:write",
+    "files:read",
+    "customers:write",
+    "customers:read",
   ],
   redirectUrl: "http://127.0.0.1:3333/oauth/callback",
 };
@@ -38,7 +51,7 @@ const captureAccessTokenFromHTTPServer = (server: "production" | "sandbox") =>
     const authorizationUrl = yield* buildAuthorizationUrl(
       server,
       state,
-      codeChallenge
+      codeChallenge,
     );
 
     let httpServer: Server | null;
@@ -65,8 +78,8 @@ const captureAccessTokenFromHTTPServer = (server: "production" | "sandbox") =>
               server,
               request.url ?? "",
               state,
-              codeVerifier
-            )
+              codeVerifier,
+            ),
           );
         }
       });
@@ -88,17 +101,22 @@ export class OAuth extends Context.Tag("OAuth")<OAuth, OAuthImpl>() {}
 
 interface OAuthImpl {
   login: (
-    server: "production" | "sandbox"
+    server: "production" | "sandbox",
   ) => Effect.Effect<Token, OAuthError, never>;
   refresh: (token: Token) => Effect.Effect<Token, OAuthError, never>;
   isAuthenticated: (
-    server: "production" | "sandbox"
+    server: "production" | "sandbox",
   ) => Effect.Effect<boolean, OAuthError, never>;
   getAccessToken: (
-    server: "production" | "sandbox"
+    server: "production" | "sandbox",
   ) => Effect.Effect<Token, OAuthError, never>;
   resolveAccessToken: (
-    server: "production" | "sandbox"
+    server: "production" | "sandbox",
+  ) => Effect.Effect<Token, OAuthError, never>;
+  setOrganization: (
+    server: "production" | "sandbox",
+    organizationId: string,
+    organizationSlug: string,
   ) => Effect.Effect<Token, OAuthError, never>;
 }
 
@@ -113,7 +131,7 @@ export const make = Effect.gen(function* () {
         return yield* Effect.fail(
           new OAuthError({
             message: "No access token found for the selected server",
-          })
+          }),
         );
       }
 
@@ -164,12 +182,25 @@ export const make = Effect.gen(function* () {
       return yield* getAccessToken(server);
     }).pipe(Effect.provide(OAuthRequirementsLayer));
 
+  const setOrganization = (
+    server: "production" | "sandbox",
+    organizationId: string,
+    organizationSlug: string,
+  ) =>
+    Effect.gen(function* () {
+      const token = yield* getAccessToken(server);
+      const updatedToken = { ...token, organizationId, organizationSlug };
+      yield* writeToTokenFile(updatedToken);
+      return updatedToken;
+    }).pipe(Effect.provide(OAuthRequirementsLayer));
+
   return OAuth.of({
     login,
     refresh,
     isAuthenticated,
     getAccessToken,
     resolveAccessToken,
+    setOrganization,
   });
 });
 
@@ -189,16 +220,16 @@ const ensureTokenFile = Effect.gen(function* () {
       .makeDirectory(path.dirname(filePath), {
         recursive: true,
       })
-      .pipe(Effect.andThen(fileSystem.writeFileString(filePath, "{}")))
+      .pipe(Effect.andThen(fileSystem.writeFileString(filePath, "{}"))),
   ).pipe(
     Effect.catchAll((error) =>
       Effect.fail(
         new OAuthError({
           message: "Failed to ensure token file exists",
           cause: error,
-        })
-      )
-    )
+        }),
+      ),
+    ),
   );
 });
 
@@ -220,19 +251,19 @@ const writeToTokenFile = (token: Token) =>
       Effect.andThen(() =>
         Schema.encode(Tokens)(mergedTokens).pipe(
           Effect.map((encoded) =>
-            new TextEncoder().encode(JSON.stringify(encoded))
+            new TextEncoder().encode(JSON.stringify(encoded)),
           ),
-          Effect.andThen((encoded) => fileSystem.writeFile(filePath, encoded))
-        )
+          Effect.andThen((encoded) => fileSystem.writeFile(filePath, encoded)),
+        ),
       ),
       Effect.catchAll((error) =>
         Effect.fail(
           new OAuthError({
             message: "Failed to write token to file",
             cause: error,
-          })
-        )
-      )
+          }),
+        ),
+      ),
     );
   });
 
@@ -250,9 +281,9 @@ const readTokenFile = Effect.gen(function* () {
         new OAuthError({
           message: "Failed to read token file",
           cause: error,
-        })
-      )
-    )
+        }),
+      ),
+    ),
   );
 });
 
@@ -274,7 +305,7 @@ const generateHash = (value: string) =>
 const buildAuthorizationUrl = (
   mode: "production" | "sandbox",
   state: string,
-  codeChallenge: string
+  codeChallenge: string,
 ) =>
   Effect.sync(() => {
     const baseUrl =
@@ -300,7 +331,7 @@ const buildAuthorizationUrl = (
   });
 
 const getLoginResult = (
-  responseUrl: string
+  responseUrl: string,
 ): Effect.Effect<[string, string], OAuthError, never> =>
   Effect.gen(function* () {
     const url = new URL(responseUrl, config.redirectUrl);
@@ -311,7 +342,7 @@ const getLoginResult = (
       return yield* Effect.fail(
         new OAuthError({
           message: "Authorization code or state is missing in the response URL",
-        })
+        }),
       );
     }
 
@@ -326,7 +357,7 @@ const refreshAccessToken = (token: Token) =>
       return yield* Effect.fail(
         new OAuthError({
           message: "No refresh token found",
-        })
+        }),
       );
     }
     const params = new URLSearchParams({
@@ -351,7 +382,7 @@ const refreshAccessToken = (token: Token) =>
               "Content-Type": "application/x-www-form-urlencoded",
             },
             body: params.toString(),
-          }
+          },
         ),
       catch: (error) =>
         new OAuthError({
@@ -373,7 +404,7 @@ const refreshAccessToken = (token: Token) =>
       return yield* Effect.fail(
         new OAuthError({
           message: `Problem encountered refreshing the access token: ${response.status}, ${details}`,
-        })
+        }),
       );
     }
 
@@ -399,9 +430,9 @@ const refreshAccessToken = (token: Token) =>
           new OAuthError({
             message: "Failed to parse token response into a Token Schema",
             cause: error,
-          })
-        )
-      )
+          }),
+        ),
+      ),
     );
   });
 
@@ -409,7 +440,7 @@ const redeemCodeForAccessToken = (
   server: "production" | "sandbox",
   responseUrl: string,
   requestState: string,
-  codeVerifier: string
+  codeVerifier: string,
 ) =>
   Effect.gen(function* () {
     const [code, responseState] = yield* getLoginResult(responseUrl);
@@ -437,7 +468,7 @@ const redeemCodeForAccessToken = (
               "Content-Type": "application/x-www-form-urlencoded",
             },
             body: params.toString(),
-          }
+          },
         ),
       catch: (error) =>
         new OAuthError({
@@ -459,7 +490,7 @@ const redeemCodeForAccessToken = (
       return yield* Effect.fail(
         new OAuthError({
           message: `Problem encountered redeeming the code for tokens: ${response.status}, ${details}`,
-        })
+        }),
       );
     }
 
@@ -471,6 +502,8 @@ const redeemCodeForAccessToken = (
           cause: error,
         }),
     });
+
+    console.log(data);
 
     return yield* Schema.decodeUnknown(Token)({
       token: data.access_token,
@@ -485,8 +518,8 @@ const redeemCodeForAccessToken = (
           new OAuthError({
             message: "Failed to parse token response into a Token Schema",
             cause: error,
-          })
-        )
-      )
+          }),
+        ),
+      ),
     );
   });

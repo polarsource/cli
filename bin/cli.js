@@ -1,11 +1,12 @@
 // src/cli.ts
-import { Command as Command3 } from "@effect/cli";
+import { Command as Command4 } from "@effect/cli";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
-import { Effect as Effect9, Layer as Layer5 } from "effect";
+import { Effect as Effect10, Layer as Layer5 } from "effect";
 
-// src/commands/login.ts
-import { Command } from "@effect/cli";
-import { Console, Effect as Effect2 } from "effect";
+// src/commands/listen.ts
+import { Args, Command } from "@effect/cli";
+import { Console, Effect as Effect2, Redacted as Redacted2 } from "effect";
+import { EventSource } from "eventsource";
 
 // src/services/oauth.ts
 import { createHash, randomBytes } from "crypto";
@@ -18,16 +19,38 @@ import open from "open";
 import os from "os";
 
 // src/schemas/Tokens.ts
-import { Scope } from "@polar-sh/sdk/models/components/scope";
 import { Schema } from "effect";
-var TokenScope = Schema.Array(Schema.Literal(...Object.values(Scope)));
+var TokenScope = Schema.Array(
+  Schema.Literal(
+    "web:read",
+    "web:write",
+    "openid",
+    "profile",
+    "email",
+    "user:read",
+    "organizations:read",
+    "organizations:write",
+    "products:read",
+    "products:write",
+    "benefits:read",
+    "benefits:write",
+    "discounts:read",
+    "discounts:write",
+    "files:write",
+    "files:read",
+    "customers:write",
+    "customers:read"
+  )
+);
 var Token = Schema.Struct({
   token: Schema.Redacted(Schema.String),
   refreshToken: Schema.Redacted(Schema.String),
   expiresIn: Schema.DurationFromMillis,
   expiresAt: Schema.Date,
   scope: TokenScope,
-  server: Schema.Literal("production", "sandbox")
+  server: Schema.Literal("production", "sandbox"),
+  organizationId: Schema.optional(Schema.String),
+  organizationSlug: Schema.optional(Schema.String)
 });
 var Tokens = Schema.Struct({
   production: Schema.optional(Token),
@@ -43,11 +66,24 @@ var SANDBOX_TOKEN_URL = "https://sandbox-api.polar.sh/v1/oauth2/token";
 var PRODUCTION_TOKEN_URL = "https://api.polar.sh/v1/oauth2/token";
 var config = {
   scopes: [
+    "web:read",
+    "web:write",
     "openid",
     "profile",
     "email",
-    "web:read",
-    "web:write"
+    "user:read",
+    "organizations:read",
+    "organizations:write",
+    "products:read",
+    "products:write",
+    "benefits:read",
+    "benefits:write",
+    "discounts:read",
+    "discounts:write",
+    "files:write",
+    "files:read",
+    "customers:write",
+    "customers:read"
   ],
   redirectUrl: "http://127.0.0.1:3333/oauth/callback"
 };
@@ -134,12 +170,19 @@ var make = Effect.gen(function* () {
     }
     return yield* getAccessToken(server);
   }).pipe(Effect.provide(OAuthRequirementsLayer));
+  const setOrganization = (server, organizationId, organizationSlug) => Effect.gen(function* () {
+    const token = yield* getAccessToken(server);
+    const updatedToken = { ...token, organizationId, organizationSlug };
+    yield* writeToTokenFile(updatedToken);
+    return updatedToken;
+  }).pipe(Effect.provide(OAuthRequirementsLayer));
   return OAuth.of({
     login: login2,
     refresh,
     isAuthenticated,
     getAccessToken,
-    resolveAccessToken
+    resolveAccessToken,
+    setOrganization
   });
 });
 var layer = Layer.scoped(OAuth, make);
@@ -232,13 +275,13 @@ var buildAuthorizationUrl = (mode, state, codeChallenge) => Effect.sync(() => {
     code_challenge: codeChallenge,
     code_challenge_method: "S256"
   });
-  const url = `${baseUrl}?${params.toString()}`;
-  return url;
+  const url2 = `${baseUrl}?${params.toString()}`;
+  return url2;
 });
 var getLoginResult = (responseUrl) => Effect.gen(function* () {
-  const url = new URL(responseUrl, config.redirectUrl);
-  const code = url.searchParams.get("code");
-  const state = url.searchParams.get("state");
+  const url2 = new URL(responseUrl, config.redirectUrl);
+  const code = url2.searchParams.get("code");
+  const state = url2.searchParams.get("state");
   if (!code || !state) {
     return yield* Effect.fail(
       new OAuthError({
@@ -368,6 +411,7 @@ var redeemCodeForAccessToken = (server, responseUrl, requestState, codeVerifier)
       cause: error
     })
   });
+  console.log(data);
   return yield* Schema2.decodeUnknown(Token)({
     token: data.access_token,
     refreshToken: data.refresh_token,
@@ -388,63 +432,79 @@ var redeemCodeForAccessToken = (server, responseUrl, requestState, codeVerifier)
   );
 });
 
-// src/commands/login.ts
-var login = Command.make(
-  "login",
-  {},
-  () => Effect2.gen(function* () {
+// src/commands/listen.ts
+var LISTEN_BASE_URL = "https://api.polar.sh/v1/cli/listen";
+var url = Args.text({ name: "url" });
+var listen = Command.make(
+  "listen",
+  { url },
+  ({ url: url2 }) => Effect2.gen(function* () {
     const oauth = yield* OAuth;
-    yield* oauth.login("production");
-    yield* Console.log("Successfully logged into Polar");
+    const token = yield* oauth.resolveAccessToken("production");
+    const accessToken = Redacted2.value(token.token);
+    if (!token.organizationId) {
+      return yield* Effect2.fail(
+        new OAuthError({
+          message: "No organization selected. Please run `polar login` first to select an organization."
+        })
+      );
+    }
+    const listenUrl = `${LISTEN_BASE_URL}/${token.organizationId}`;
+    yield* Console.log(`Listening for events, forwarding to ${url2}...`);
+    yield* Effect2.async((resume) => {
+      const eventSource = new EventSource(listenUrl, {
+        fetch: (input, init) => fetch(input, {
+          ...init,
+          headers: {
+            ...init.headers,
+            Authorization: `Bearer ${accessToken}`
+          }
+        })
+      });
+      eventSource.onmessage = (event) => {
+        let parsed;
+        try {
+          parsed = JSON.parse(event.data);
+        } catch {
+          console.error("Failed to parse event:", event.data);
+          return;
+        }
+        console.log(parsed);
+        fetch(url2, {
+          method: "POST",
+          headers: parsed.headers,
+          body: JSON.stringify(parsed.payload?.payload)
+        }).then((res) => {
+          console.log(`>> ${res.status} ${res.statusText}`);
+        }).catch((err) => {
+          console.error(`>> Failed to forward event: ${err}`);
+        });
+      };
+      eventSource.onerror = (error) => {
+        eventSource.close();
+        resume(
+          Effect2.fail(
+            new OAuthError({
+              message: error.message ?? "Event stream error",
+              cause: error
+            })
+          )
+        );
+      };
+      return Effect2.sync(() => {
+        eventSource.close();
+      });
+    });
   })
 );
 
-// src/commands/migrate.ts
-import { Command as Command2, Options, Prompt as Prompt3 } from "@effect/cli";
-import { Effect as Effect8 } from "effect";
-
-// src/prompts/migration.ts
-import { Prompt } from "@effect/cli";
-import { Effect as Effect3 } from "effect";
-var migrationProviders = [
-  { value: "lemonSqueezy", title: "Lemon Squeezy" },
-  { value: "paddle", title: "Paddle", disabled: true },
-  { value: "stripe", title: "Stripe", disabled: true }
-];
-var providerPrompt = Prompt.select({
-  message: "Select Migration Provider",
-  choices: migrationProviders
-});
-var migrationPrompt = Prompt.multiSelect({
-  message: "Select Entities to Migrate",
-  choices: [
-    { value: "products", title: "Products" },
-    { value: "customers", title: "Customers" }
-  ]
-});
-var apiKeyPrompt = Prompt.text({
-  message: "Enter the API Key",
-  validate: (value) => {
-    if (value.length === 0) {
-      return Effect3.fail("API Key is required");
-    }
-    return Effect3.succeed(value);
-  }
-});
-var storePrompt = (provider) => Effect3.gen(function* () {
-  const stores = yield* provider.stores();
-  return yield* Prompt.select({
-    message: "Select Store to Migrate",
-    choices: stores.data.map((store) => ({
-      value: store.id,
-      title: store.attributes.name
-    }))
-  });
-});
+// src/commands/login.ts
+import { Command as Command2 } from "@effect/cli";
+import { Console as Console2, Effect as Effect5 } from "effect";
 
 // src/prompts/organizations.ts
-import { Prompt as Prompt2 } from "@effect/cli";
-import { Effect as Effect5 } from "effect";
+import { Prompt } from "@effect/cli";
+import { Effect as Effect4 } from "effect";
 
 // src/schemas/Organization.ts
 import { Schema as Schema3 } from "effect";
@@ -455,7 +515,7 @@ var OrganizationCreate = Schema3.Struct({
 
 // src/services/polar.ts
 import { Polar as PolarSDK } from "@polar-sh/sdk";
-import { Context as Context2, Data as Data2, Effect as Effect4, Layer as Layer2, Redacted as Redacted2 } from "effect";
+import { Context as Context2, Data as Data2, Effect as Effect3, Layer as Layer2, Redacted as Redacted3 } from "effect";
 var SANDBOX_SERVER_URL = "https://sandbox-api.polar.sh";
 var PRODUCTION_SERVER_URL = "https://api.polar.sh";
 var PolarError = class extends Data2.TaggedError("PolarError") {
@@ -463,20 +523,20 @@ var PolarError = class extends Data2.TaggedError("PolarError") {
 var Polar = class extends Context2.Tag("Polar")() {
 };
 var PolarRequirementsLayer = Layer2.mergeAll(layer);
-var make2 = Effect4.gen(function* () {
+var make2 = Effect3.gen(function* () {
   const oauth = yield* OAuth;
-  const getClient = (server) => Effect4.gen(function* () {
+  const getClient = (server) => Effect3.gen(function* () {
     const token = yield* oauth.resolveAccessToken(server);
     const serverUrl = server === "production" ? PRODUCTION_SERVER_URL : SANDBOX_SERVER_URL;
     const client = new PolarSDK({
       serverURL: serverUrl,
-      accessToken: Redacted2.value(token.token)
+      accessToken: Redacted3.value(token.token)
     });
     return client;
   }).pipe(
-    Effect4.catchTag(
+    Effect3.catchTag(
       "OAuthError",
-      (error) => Effect4.fail(
+      (error) => Effect3.fail(
         new PolarError({
           message: "Failed to get Polar SDK client",
           cause: error
@@ -484,10 +544,10 @@ var make2 = Effect4.gen(function* () {
       )
     )
   );
-  const use = (fn) => Effect4.gen(function* () {
+  const use = (fn) => Effect3.gen(function* () {
     const client = yield* getClient("production");
     const result = fn(client);
-    return yield* Effect4.isEffect(result) ? result : Effect4.promise(() => result);
+    return yield* Effect3.isEffect(result) ? result : Effect3.promise(() => result);
   });
   return Polar.of({
     getClient,
@@ -516,15 +576,15 @@ var fetchAllPages = async (task) => {
 };
 
 // src/prompts/organizations.ts
-var selectOrganizationPrompt = Effect5.gen(function* () {
+var selectOrganizationPrompt = Effect4.gen(function* () {
   const polar = yield* Polar;
   const organizations = yield* polar.use(
     (client) => client.organizations.list({
       page: 1,
       limit: 100
     })
-  ).pipe(Effect5.map((organizations2) => organizations2.result.items));
-  return yield* Prompt2.select({
+  ).pipe(Effect4.map((organizations2) => organizations2.result.items));
+  return yield* Prompt.select({
     message: "Select Organization",
     choices: [
       ...organizations.map((organization) => ({
@@ -535,14 +595,14 @@ var selectOrganizationPrompt = Effect5.gen(function* () {
     ]
   });
 });
-var organizationNamePrompt = Prompt2.text({
+var organizationNamePrompt = Prompt.text({
   message: "Organization Name"
 });
-var organizationSlugPrompt = (name) => Prompt2.text({
+var organizationSlugPrompt = (name) => Prompt.text({
   message: "Organization Slug",
   default: slugify(name)
 });
-var createNewOrganizationPrompt = Effect5.gen(function* () {
+var createNewOrganizationPrompt = Effect4.gen(function* () {
   const polar = yield* Polar;
   const name = yield* organizationNamePrompt;
   const slug = yield* organizationSlugPrompt(name);
@@ -556,13 +616,93 @@ var createNewOrganizationPrompt = Effect5.gen(function* () {
   return organization.id;
 });
 var organizationPrompt = selectOrganizationPrompt.pipe(
-  Effect5.flatMap((organization) => {
+  Effect4.flatMap((organization) => {
     if (organization === "new") {
       return createNewOrganizationPrompt;
     }
-    return Effect5.succeed(organization);
+    return Effect4.succeed(organization);
   })
 );
+var organizationLoginPrompt = Effect4.gen(function* () {
+  const polar = yield* Polar;
+  const organizations = yield* polar.use(
+    (client) => client.organizations.list({
+      page: 1,
+      limit: 100
+    })
+  ).pipe(Effect4.map((organizations2) => organizations2.result.items));
+  const selectedId = yield* Prompt.select({
+    message: "Select Organization",
+    choices: organizations.map((organization) => ({
+      value: organization.id,
+      title: organization.name
+    }))
+  });
+  const selected = organizations.find((org) => org.id === selectedId);
+  return { id: selected.id, slug: selected.slug };
+});
+
+// src/commands/login.ts
+var login = Command2.make(
+  "login",
+  {},
+  () => Effect5.gen(function* () {
+    const oauth = yield* OAuth;
+    yield* oauth.login("production");
+    const organization = yield* organizationLoginPrompt;
+    yield* oauth.setOrganization(
+      "production",
+      organization.id,
+      organization.slug
+    );
+    yield* Console2.log(
+      `Successfully logged into Polar (organization: ${organization.slug})`
+    );
+  })
+);
+
+// src/commands/migrate.ts
+import { Command as Command3, Options, Prompt as Prompt3 } from "@effect/cli";
+import { Effect as Effect9 } from "effect";
+
+// src/prompts/migration.ts
+import { Prompt as Prompt2 } from "@effect/cli";
+import { Effect as Effect6 } from "effect";
+var migrationProviders = [
+  { value: "lemonSqueezy", title: "Lemon Squeezy" },
+  { value: "paddle", title: "Paddle", disabled: true },
+  { value: "stripe", title: "Stripe", disabled: true }
+];
+var providerPrompt = Prompt2.select({
+  message: "Select Migration Provider",
+  choices: migrationProviders
+});
+var migrationPrompt = Prompt2.multiSelect({
+  message: "Select Entities to Migrate",
+  choices: [
+    { value: "products", title: "Products" },
+    { value: "customers", title: "Customers" }
+  ]
+});
+var apiKeyPrompt = Prompt2.text({
+  message: "Enter the API Key",
+  validate: (value) => {
+    if (value.length === 0) {
+      return Effect6.fail("API Key is required");
+    }
+    return Effect6.succeed(value);
+  }
+});
+var storePrompt = (provider) => Effect6.gen(function* () {
+  const stores = yield* provider.stores();
+  return yield* Prompt2.select({
+    message: "Select Store to Migrate",
+    choices: stores.data.map((store) => ({
+      value: store.id,
+      title: store.attributes.name
+    }))
+  });
+});
 
 // src/schemas/Migration.ts
 import { Schema as Schema4 } from "effect";
@@ -588,7 +728,7 @@ import {
   listStores,
   listVariants
 } from "@lemonsqueezy/lemonsqueezy.js";
-import { Context as Context3, Data as Data3, Effect as Effect6, Layer as Layer3, Schema as Schema7 } from "effect";
+import { Context as Context3, Data as Data3, Effect as Effect7, Layer as Layer3, Schema as Schema7 } from "effect";
 
 // src/schemas/Customer.ts
 import { Schema as Schema5 } from "effect";
@@ -707,10 +847,10 @@ var LemonSqueezyError = class extends Data3.TaggedError("LemonSqueezyError") {
 };
 var LemonSqueezy = class extends Context3.Tag("LemonSqueezy")() {
 };
-var make3 = (apiKey) => Effect6.gen(function* () {
+var make3 = (apiKey) => Effect7.gen(function* () {
   const client = yield* createLemonClient(apiKey);
   return LemonSqueezy.of({
-    stores: () => Effect6.tryPromise({
+    stores: () => Effect7.tryPromise({
       try: () => client.listStores().then(
         (response) => response.data ?? []
       ),
@@ -719,7 +859,7 @@ var make3 = (apiKey) => Effect6.gen(function* () {
         cause: error
       })
     }),
-    customers: (storeId) => Effect6.tryPromise({
+    customers: (storeId) => Effect7.tryPromise({
       try: async () => {
         const customers = await fetchAllPages(
           (pageNumber) => client.listCustomers({
@@ -742,9 +882,9 @@ var make3 = (apiKey) => Effect6.gen(function* () {
         cause: error
       })
     }).pipe(
-      Effect6.map(parseCustomers),
-      Effect6.flatMap(Schema7.decodeUnknown(Schema7.Array(CustomerCreate))),
-      Effect6.catchTag(
+      Effect7.map(parseCustomers),
+      Effect7.flatMap(Schema7.decodeUnknown(Schema7.Array(CustomerCreate))),
+      Effect7.catchTag(
         "ParseError",
         (error) => new LemonSqueezyError({
           message: "Failed to parse customers",
@@ -752,7 +892,7 @@ var make3 = (apiKey) => Effect6.gen(function* () {
         })
       )
     ),
-    products: (_storeId) => Effect6.tryPromise({
+    products: (_storeId) => Effect7.tryPromise({
       try: async () => {
         return await fetchAllPages(
           (pageNumber) => client.listVariants({
@@ -771,9 +911,9 @@ var make3 = (apiKey) => Effect6.gen(function* () {
         cause: error
       })
     }).pipe(
-      Effect6.map(parseVariants),
-      Effect6.flatMap(Schema7.decodeUnknown(Schema7.Array(ProductCreate))),
-      Effect6.catchTag(
+      Effect7.map(parseVariants),
+      Effect7.flatMap(Schema7.decodeUnknown(Schema7.Array(ProductCreate))),
+      Effect7.catchTag(
         "ParseError",
         (error) => new LemonSqueezyError({
           message: "Failed to parse products",
@@ -783,7 +923,7 @@ var make3 = (apiKey) => Effect6.gen(function* () {
     )
   });
 });
-var createLemonClient = (apiKey) => Effect6.try(() => {
+var createLemonClient = (apiKey) => Effect7.try(() => {
   lemonSqueezySetup({
     apiKey,
     onError: (error) => {
@@ -805,30 +945,30 @@ var createLemonClient = (apiKey) => Effect6.try(() => {
 });
 
 // src/services/migration/migrate.ts
-import { Context as Context4, Data as Data4, Effect as Effect7, Layer as Layer4, Schema as Schema8 } from "effect";
+import { Context as Context4, Data as Data4, Effect as Effect8, Layer as Layer4, Schema as Schema8 } from "effect";
 var MigrationError = class extends Data4.TaggedError("MigrationError") {
 };
 var Migration = class extends Context4.Tag("Migration")() {
 };
-var make4 = Effect7.gen(function* () {
+var make4 = Effect8.gen(function* () {
   return Migration.of({
-    products: (provider, migration) => Effect7.gen(function* () {
+    products: (provider, migration) => Effect8.gen(function* () {
       const polar = yield* Polar;
       const _oauth = yield* OAuth;
       const providerProducts = provider.products(migration.from);
       yield* providerProducts.pipe(
-        Effect7.flatMap(Schema8.encode(Schema8.Array(ProductCreate))),
-        Effect7.mapError(
+        Effect8.flatMap(Schema8.encode(Schema8.Array(ProductCreate))),
+        Effect8.mapError(
           (error) => new PolarError({
             message: "Failed to encode products",
             cause: error
           })
         ),
-        Effect7.flatMap(
-          (products) => Effect7.all(
+        Effect8.flatMap(
+          (products) => Effect8.all(
             products.map(
               (product) => polar.use(
-                (client) => Effect7.tryPromise({
+                (client) => Effect8.tryPromise({
                   try: () => client.products.create({
                     ...product,
                     organizationId: migration.to
@@ -845,28 +985,28 @@ var make4 = Effect7.gen(function* () {
             }
           )
         ),
-        Effect7.tap(
-          (products) => Effect7.logDebug(`${products.length} products migrated`)
+        Effect8.tap(
+          (products) => Effect8.logDebug(`${products.length} products migrated`)
         )
       );
     }),
-    customers: (provider, migration) => Effect7.gen(function* () {
+    customers: (provider, migration) => Effect8.gen(function* () {
       const polar = yield* Polar;
       const _oauth = yield* OAuth;
       const providerCustomers = provider.customers(migration.from);
       yield* providerCustomers.pipe(
-        Effect7.flatMap(Schema8.encode(Schema8.Array(CustomerCreate))),
-        Effect7.mapError(
+        Effect8.flatMap(Schema8.encode(Schema8.Array(CustomerCreate))),
+        Effect8.mapError(
           (error) => new PolarError({
             message: "Failed to encode customers",
             cause: error
           })
         ),
-        Effect7.flatMap(
-          (customers) => Effect7.all(
+        Effect8.flatMap(
+          (customers) => Effect8.all(
             customers.map(
               (customer) => polar.use(
-                (client) => Effect7.tryPromise({
+                (client) => Effect8.tryPromise({
                   try: () => client.customers.create({
                     ...customer,
                     organizationId: migration.to
@@ -883,8 +1023,8 @@ var make4 = Effect7.gen(function* () {
             }
           )
         ),
-        Effect7.tap(
-          (customers) => Effect7.logDebug(`${customers.length} customers migrated`)
+        Effect8.tap(
+          (customers) => Effect8.logDebug(`${customers.length} customers migrated`)
         )
       );
     })
@@ -893,13 +1033,13 @@ var make4 = Effect7.gen(function* () {
 var layer3 = Layer4.scoped(Migration, make4);
 
 // src/commands/migrate.ts
-var migrate = Command2.make(
+var migrate = Command3.make(
   "migrate",
   {},
-  () => Effect8.gen(function* () {
+  () => Effect9.gen(function* () {
     const provider = yield* Prompt3.all([providerPrompt, apiKeyPrompt]).pipe(
       Prompt3.run,
-      Effect8.flatMap(([provider2, apiKey]) => resolveProvider(provider2, apiKey))
+      Effect9.flatMap(([provider2, apiKey]) => resolveProvider(provider2, apiKey))
     );
     const migration = yield* Migration;
     const storeToMigrate = yield* storePrompt(provider);
@@ -909,10 +1049,10 @@ var migrate = Command2.make(
       from: MigrationOrigin.make(storeToMigrate),
       to: MigrationDestination.make(organizationId)
     });
-    yield* Effect8.all(
+    yield* Effect9.all(
       {
-        products: entitiesToMigrate.includes("products") ? migration.products(provider, migrationContext) : Effect8.succeed([]),
-        customers: entitiesToMigrate.includes("customers") ? migration.customers(provider, migrationContext) : Effect8.succeed([])
+        products: entitiesToMigrate.includes("products") ? migration.products(provider, migrationContext) : Effect9.succeed([]),
+        customers: entitiesToMigrate.includes("customers") ? migration.customers(provider, migrationContext) : Effect9.succeed([])
       },
       {
         concurrency: "unbounded"
@@ -926,16 +1066,16 @@ var resolveProvider = (provider, apiKey) => {
     case "lemonSqueezy":
       return make3(apiKey);
     default:
-      return Effect8.die("Unsupported Migration Provider");
+      return Effect9.die("Unsupported Migration Provider");
   }
 };
 
 // src/cli.ts
 var VERSION = "v1.0.0";
-var mainCommand = Command3.make("polar").pipe(
-  Command3.withSubcommands([login, migrate])
+var mainCommand = Command4.make("polar").pipe(
+  Command4.withSubcommands([login, migrate, listen])
 );
-var cli = Command3.run(mainCommand, {
+var cli = Command4.run(mainCommand, {
   name: "Polar CLI",
   version: VERSION
 });
@@ -945,4 +1085,4 @@ var services = Layer5.mergeAll(
   layer3,
   NodeContext.layer
 );
-cli(process.argv).pipe(Effect9.provide(services), NodeRuntime.runMain);
+cli(process.argv).pipe(Effect10.provide(services), NodeRuntime.runMain);

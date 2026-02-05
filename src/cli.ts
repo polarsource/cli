@@ -1,6 +1,7 @@
 import { Command } from "@effect/cli";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Effect, Layer } from "effect";
+import { listen } from "./commands/listen";
 import { login } from "./commands/login";
 import { migrate } from "./commands/migrate";
 import * as Migration from "./services/migration/migrate";
@@ -10,7 +11,7 @@ import * as Polar from "./services/polar";
 const VERSION = "v1.0.0";
 
 const mainCommand = Command.make("polar").pipe(
-  Command.withSubcommands([login, migrate])
+  Command.withSubcommands([login, migrate, listen])
 );
 
 const cli = Command.run(mainCommand, {

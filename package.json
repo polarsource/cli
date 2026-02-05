@@ -25,6 +25,7 @@
     "@lemonsqueezy/lemonsqueezy.js": "^4.0.0",
     "@polar-sh/sdk": "^0.34.11",
     "effect": "^3.17.7",
+    "eventsource": "^4.1.0",
     "open": "^10.2.0"
   },
   "devDependencies": {

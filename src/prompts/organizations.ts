@@ -63,3 +63,27 @@ export const organizationPrompt = selectOrganizationPrompt.pipe(
     return Effect.succeed(organization);
   })
 );
+
+export const organizationLoginPrompt = Effect.gen(function* () {
+  const polar = yield* Polar.Polar;
+  const organizations = yield* polar
+    .use((client) =>
+      client.organizations.list({
+        page: 1,
+        limit: 100,
+      })
+    )
+    .pipe(Effect.map((organizations) => organizations.result.items));
+
+  const selectedId = yield* Prompt.select({
+    message: "Select Organization",
+    choices: organizations.map((organization) => ({
+      value: organization.id,
+      title: organization.name,
+    })),
+  });
+
+  const selected = organizations.find((org) => org.id === selectedId)!;
+
+  return { id: selected.id, slug: selected.slug };
+});
