@@ -1,11 +1,11 @@
 // src/cli.ts
-import { Command as Command4 } from "@effect/cli";
+import { Command as Command5 } from "@effect/cli";
 import { BunContext, BunRuntime } from "@effect/platform-bun";
-import { Effect as Effect10, Layer as Layer5 } from "effect";
+import { Effect as Effect11, Layer as Layer5 } from "effect";
 
 // src/commands/listen.ts
 import { Args, Command } from "@effect/cli";
-import { Effect as Effect4, Redacted as Redacted3, Schema as Schema5 } from "effect";
+import { Effect as Effect4, Either, Redacted as Redacted3, Schema as Schema5 } from "effect";
 import { EventSource } from "eventsource";
 
 // src/prompts/organizations.ts
@@ -417,7 +417,6 @@ var redeemCodeForAccessToken = (server, responseUrl, requestState, codeVerifier)
       cause: error
     })
   });
-  console.log(data);
   return yield* Schema3.decodeUnknown(Token)({
     token: data.access_token,
     refreshToken: data.refresh_token,
@@ -569,9 +568,29 @@ var organizationLoginPrompt = Effect3.gen(function* () {
 import { Schema as Schema4 } from "effect";
 var ListenAck = Schema4.Struct({
   key: Schema4.Literal("connected"),
-  ts: Schema4.Date,
+  ts: Schema4.DateFromString,
   secret: Schema4.String
 });
+var ListenWebhookEvent = Schema4.Struct({
+  id: Schema4.String,
+  key: Schema4.String,
+  payload: Schema4.Struct({
+    webhook_event_id: Schema4.String,
+    payload: Schema4.Struct({
+      type: Schema4.String,
+      timestamp: Schema4.String,
+      data: Schema4.Struct({})
+    })
+  }),
+  headers: Schema4.Struct({
+    "user-agent": Schema4.Literal("polar.sh webhooks"),
+    "content-type": Schema4.Literal("application/json"),
+    "webhook-id": Schema4.String,
+    "webhook-timestamp": Schema4.String,
+    "webhook-signature": Schema4.String
+  })
+});
+var ListenEvent = Schema4.Union(ListenAck, ListenWebhookEvent);
 
 // src/commands/listen.ts
 var LISTEN_BASE_URL = "https://api.polar.sh/v1/cli/listen";
@@ -596,34 +615,40 @@ var listen = Command.make(
         })
       });
       eventSource.onmessage = (event) => {
-        let parsed;
-        try {
-          parsed = JSON.parse(event.data);
-        } catch {
-          console.error("Failed to parse event:", event.data);
-          return;
-        }
-        if (Schema5.is(ListenAck)(parsed)) {
+        const json = JSON.parse(event.data);
+        const ack = Schema5.decodeUnknownEither(ListenAck)(json);
+        if (Either.isRight(ack)) {
+          const { secret } = ack.right;
           const dim = "\x1B[2m";
           const bold = "\x1B[1m";
           const cyan = "\x1B[36m";
           const reset = "\x1B[0m";
           console.log("");
-          console.log(`  ${bold}${cyan}Connected${reset}  ${bold}${organization.name}${reset}`);
-          console.log(`  ${dim}Secret${reset}     ${parsed.secret}`);
+          console.log(
+            `  ${bold}${cyan}Connected${reset}  ${bold}${organization.name}${reset}`
+          );
+          console.log(`  ${dim}Secret${reset}     ${secret}`);
           console.log(`  ${dim}Forwarding${reset} ${url2}`);
           console.log("");
           console.log(`  ${dim}Waiting for events...${reset}`);
           console.log("");
           return;
         }
-        console.log(parsed);
+        const webhookEvent = Schema5.decodeUnknownEither(ListenWebhookEvent)(json);
+        if (Either.isLeft(webhookEvent)) {
+          console.error(">> Failed to decode event");
+          return;
+        }
         fetch(url2, {
           method: "POST",
-          headers: parsed.headers,
-          body: JSON.stringify(parsed.payload?.payload)
+          headers: webhookEvent.right.headers,
+          body: JSON.stringify(webhookEvent.right.payload.payload)
         }).then((res) => {
-          console.log(`>> ${res.status} ${res.statusText}`);
+          const cyan = "\x1B[36m";
+          const reset = "\x1B[0m";
+          console.log(
+            `>> '${cyan}${webhookEvent.right.payload.payload.type}${reset}' >> ${res.status} ${res.statusText}`
+          );
         }).catch((err) => {
           console.error(`>> Failed to forward event: ${err}`);
         });
@@ -1068,12 +1093,209 @@ var resolveProvider = (provider, apiKey) => {
   }
 };
 
-// src/cli.ts
+// src/commands/update.ts
+import { Command as Command4 } from "@effect/cli";
+import { Console as Console2, Effect as Effect10, Schema as Schema11 } from "effect";
+import { createHash as createHash2 } from "crypto";
+import { chmod, mkdtemp, rm } from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
+
+// src/version.ts
 var VERSION = "v1.0.0";
-var mainCommand = Command4.make("polar").pipe(
-  Command4.withSubcommands([login, migrate, listen])
+
+// src/commands/update.ts
+var REPO = "polarsource/cli";
+var GitHubRelease = Schema11.Struct({
+  tag_name: Schema11.String,
+  assets: Schema11.Array(
+    Schema11.Struct({
+      name: Schema11.String,
+      browser_download_url: Schema11.String
+    })
+  )
+});
+function detectPlatform() {
+  const platform = process.platform;
+  const arch = process.arch;
+  let os2;
+  switch (platform) {
+    case "darwin":
+      os2 = "darwin";
+      break;
+    case "linux":
+      os2 = "linux";
+      break;
+    default:
+      throw new Error(`Unsupported OS: ${platform}`);
+  }
+  let normalizedArch;
+  switch (arch) {
+    case "x64":
+      normalizedArch = "x64";
+      break;
+    case "arm64":
+      normalizedArch = "arm64";
+      break;
+    default:
+      throw new Error(`Unsupported architecture: ${arch}`);
+  }
+  if (os2 === "linux" && normalizedArch === "arm64") {
+    throw new Error("Linux arm64 is not yet supported");
+  }
+  return { os: os2, arch: normalizedArch };
+}
+var downloadAndUpdate = (release, latestVersion) => Effect10.gen(function* () {
+  const bold = "\x1B[1m";
+  const cyan = "\x1B[36m";
+  const green = "\x1B[32m";
+  const dim = "\x1B[2m";
+  const reset = "\x1B[0m";
+  const { os: os2, arch } = detectPlatform();
+  const platform = `${os2}-${arch}`;
+  const archiveName = `polar-${platform}.tar.gz`;
+  const asset = release.assets.find((a) => a.name === archiveName);
+  if (!asset) {
+    return yield* Effect10.fail(
+      new Error(`No release asset found for platform: ${platform}`)
+    );
+  }
+  const checksumsAsset = release.assets.find(
+    (a) => a.name === "checksums.txt"
+  );
+  if (!checksumsAsset) {
+    return yield* Effect10.fail(
+      new Error("No checksums.txt found in release")
+    );
+  }
+  const tempDir = yield* Effect10.tryPromise({
+    try: () => mkdtemp(join(tmpdir(), "polar-update-")),
+    catch: () => new Error("Failed to create temp directory")
+  });
+  yield* Effect10.ensuring(
+    Effect10.gen(function* () {
+      yield* Console2.log(`${dim}Downloading ${latestVersion}...${reset}`);
+      const archiveBuffer = yield* Effect10.tryPromise({
+        try: () => fetch(asset.browser_download_url).then((res) => {
+          if (!res.ok)
+            throw new Error(
+              `Download failed: ${res.status} ${res.statusText}`
+            );
+          return res.arrayBuffer();
+        }),
+        catch: (e) => new Error(
+          `Failed to download binary: ${e instanceof Error ? e.message : e}`
+        )
+      });
+      const archivePath = join(tempDir, archiveName);
+      yield* Effect10.tryPromise({
+        try: () => Bun.write(archivePath, archiveBuffer),
+        catch: () => new Error("Failed to write archive to disk")
+      });
+      yield* Console2.log(`${dim}Verifying checksum...${reset}`);
+      const checksumsText = yield* Effect10.tryPromise({
+        try: () => fetch(checksumsAsset.browser_download_url).then((res) => {
+          if (!res.ok) throw new Error("Failed to download checksums");
+          return res.text();
+        }),
+        catch: () => new Error("Failed to download checksums.txt")
+      });
+      const expectedChecksum = checksumsText.split("\n").find((line) => line.includes(archiveName))?.split(/\s+/)[0];
+      if (!expectedChecksum) {
+        return yield* Effect10.fail(
+          new Error(`No checksum found for ${archiveName}`)
+        );
+      }
+      const archiveData = yield* Effect10.tryPromise({
+        try: () => Bun.file(archivePath).arrayBuffer(),
+        catch: () => new Error("Failed to read archive for checksum")
+      });
+      const hash = createHash2("sha256");
+      hash.update(new Uint8Array(archiveData));
+      const actualChecksum = hash.digest("hex");
+      if (expectedChecksum !== actualChecksum) {
+        return yield* Effect10.fail(
+          new Error(
+            `Checksum mismatch!
+  Expected: ${expectedChecksum}
+  Got:      ${actualChecksum}`
+          )
+        );
+      }
+      yield* Console2.log(`${dim}Extracting...${reset}`);
+      const tar = Bun.spawn(["tar", "-xzf", archivePath, "-C", tempDir], {
+        stdout: "ignore",
+        stderr: "pipe"
+      });
+      const tarExitCode = yield* Effect10.tryPromise({
+        try: () => tar.exited,
+        catch: () => new Error("Failed to extract archive")
+      });
+      if (tarExitCode !== 0) {
+        const stderr = yield* Effect10.tryPromise({
+          try: () => new Response(tar.stderr).text(),
+          catch: () => new Error("Failed to read tar stderr")
+        });
+        return yield* Effect10.fail(
+          new Error(`Failed to extract archive: ${stderr}`)
+        );
+      }
+      const binaryPath = process.execPath;
+      const newBinaryPath = join(tempDir, "polar");
+      yield* Console2.log(`${dim}Replacing binary...${reset}`);
+      yield* Effect10.tryPromise({
+        try: async () => {
+          const newBinary = await Bun.file(newBinaryPath).arrayBuffer();
+          await Bun.write(binaryPath, newBinary);
+          await chmod(binaryPath, 493);
+        },
+        catch: (e) => new Error(
+          `Failed to replace binary: ${e instanceof Error ? e.message : e}`
+        )
+      });
+      yield* Console2.log("");
+      yield* Console2.log(
+        `  ${bold}${green}Updated successfully!${reset} ${dim}${VERSION}${reset} -> ${bold}${cyan}${latestVersion}${reset}`
+      );
+      yield* Console2.log("");
+    }),
+    Effect10.promise(
+      () => rm(tempDir, { recursive: true, force: true }).catch(() => {
+      })
+    )
+  );
+});
+var update = Command4.make(
+  "update",
+  {},
+  () => Effect10.gen(function* () {
+    const green = "\x1B[32m";
+    const dim = "\x1B[2m";
+    const reset = "\x1B[0m";
+    yield* Console2.log(`${dim}Checking for updates...${reset}`);
+    const response = yield* Effect10.tryPromise({
+      try: () => fetch(
+        `https://api.github.com/repos/${REPO}/releases/latest`
+      ).then((res) => res.json()),
+      catch: () => new Error("Failed to fetch latest release from GitHub")
+    });
+    const release = yield* Schema11.decodeUnknown(GitHubRelease)(response);
+    const latestVersion = release.tag_name;
+    if (latestVersion === VERSION) {
+      yield* Console2.log(
+        `${green}Already up to date${reset} ${dim}(${VERSION})${reset}`
+      );
+      return;
+    }
+    yield* downloadAndUpdate(release, latestVersion);
+  })
 );
-var cli = Command4.run(mainCommand, {
+
+// src/cli.ts
+var mainCommand = Command5.make("polar").pipe(
+  Command5.withSubcommands([login, migrate, listen, update])
+);
+var cli = Command5.run(mainCommand, {
   name: "Polar CLI",
   version: VERSION
 });
@@ -1083,4 +1305,4 @@ var services = Layer5.mergeAll(
   layer3,
   BunContext.layer
 );
-cli(process.argv).pipe(Effect10.provide(services), BunRuntime.runMain);
+cli(process.argv).pipe(Effect11.provide(services), BunRuntime.runMain);

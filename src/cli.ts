@@ -4,14 +4,14 @@ import { Effect, Layer } from "effect";
 import { listen } from "./commands/listen";
 import { login } from "./commands/login";
 import { migrate } from "./commands/migrate";
+import { update } from "./commands/update";
 import * as Migration from "./services/migration/migrate";
 import * as OAuth from "./services/oauth";
 import * as Polar from "./services/polar";
-
-const VERSION = "v1.0.0";
+import { VERSION } from "./version";
 
 const mainCommand = Command.make("polar").pipe(
-  Command.withSubcommands([login, migrate, listen])
+  Command.withSubcommands([login, migrate, listen, update])
 );
 
 const cli = Command.run(mainCommand, {

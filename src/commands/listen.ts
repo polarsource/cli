@@ -68,8 +68,10 @@ export const listen = Command.make("listen", { url }, ({ url }) =>
           body: JSON.stringify(webhookEvent.right.payload.payload),
         })
           .then((res) => {
+            const cyan = "\x1b[36m";
+            const reset = "\x1b[0m";
             console.log(
-              `>> '${webhookEvent.right.payload.payload.type}' >> ${res.status} ${res.statusText}`,
+              `>> '${cyan}${webhookEvent.right.payload.payload.type}${reset}' >> ${res.status} ${res.statusText}`,
             );
           })
           .catch((err) => {
