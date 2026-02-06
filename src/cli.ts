@@ -7,6 +7,7 @@ import { update } from "./commands/update";
 import * as Migration from "./services/migration/migrate";
 import * as OAuth from "./services/oauth";
 import * as Polar from "./services/polar";
+import { showUpdateNotice, checkForUpdateInBackground } from "./services/update-check";
 import { VERSION } from "./version";
 
 const mainCommand = Command.make("polar").pipe(
@@ -29,5 +30,8 @@ const services = Layer.mergeAll(
   Migration.layer,
   BunContext.layer
 );
+
+showUpdateNotice();
+checkForUpdateInBackground();
 
 cli(process.argv).pipe(Effect.provide(services), BunRuntime.runMain);
