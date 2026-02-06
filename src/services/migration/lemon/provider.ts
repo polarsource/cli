@@ -12,7 +12,7 @@ import {
 import { Context, Data, Effect, Layer, Schema } from "effect";
 import { CustomerCreate } from "../../../schemas/Customer";
 import { ProductCreate } from "../../../schemas/Product";
-import { fetchAllPages } from "../../../utils";
+import { fetchAllPages, promiseAllInBatches } from "../../../utils";
 import { parseCustomers, parseVariants } from "./transform";
 
 export class LemonSqueezyError extends Data.TaggedError("LemonSqueezyError")<{
@@ -21,7 +21,11 @@ export class LemonSqueezyError extends Data.TaggedError("LemonSqueezyError")<{
 }> {}
 
 export interface LemonSqueezyImpl {
-  stores: () => Effect.Effect<ListStores, LemonSqueezyError, never>;
+  stores: () => Effect.Effect<
+    ListStores["data"],
+    LemonSqueezyError,
+    never
+  >;
   customers: (
     storeId: string
   ) => Effect.Effect<readonly CustomerCreate[], LemonSqueezyError, never>;
@@ -43,11 +47,16 @@ export const make = (apiKey: string) =>
       stores: () =>
         Effect.tryPromise({
           try: () =>
-            client
-              .listStores()
-              .then(
-                (response) => response.data ?? ([] as unknown as ListStores)
-              ),
+            fetchAllPages((pageNumber: number) =>
+              client
+                .listStores({
+                  page: { number: pageNumber, size: 50 },
+                })
+                .then((response) => ({
+                  data: response.data?.data,
+                  lastPage: response.data?.meta.page.lastPage ?? 1,
+                }))
+            ),
           catch: (error) =>
             new LemonSqueezyError({
               message: "Failed to list Lemon Squeezy stores",
@@ -93,22 +102,41 @@ export const make = (apiKey: string) =>
               })
           )
         ),
-      products: (_storeId: string) =>
+      products: (storeId: string) =>
         Effect.tryPromise({
           try: async () => {
-            return await fetchAllPages((pageNumber: number) =>
+            // Fetch all products for this store
+            const products = await fetchAllPages((pageNumber: number) =>
               client
-                .listVariants({
-                  page: {
-                    number: pageNumber,
-                    size: 50,
-                  },
+                .listProducts({
+                  filter: { storeId },
+                  page: { number: pageNumber, size: 50 },
                 })
                 .then((response) => ({
                   data: response.data?.data,
                   lastPage: response.data?.meta.page.lastPage ?? 1,
                 }))
             );
+
+            // Fetch variants for each product in batches to respect rate limits
+            const variantGroups = await promiseAllInBatches(
+              (product) =>
+                fetchAllPages((pageNumber: number) =>
+                  client
+                    .listVariants({
+                      filter: { productId: product.id },
+                      page: { number: pageNumber, size: 50 },
+                    })
+                    .then((response) => ({
+                      data: response.data?.data,
+                      lastPage: response.data?.meta.page.lastPage ?? 1,
+                    }))
+                ),
+              products,
+              5
+            );
+
+            return variantGroups.flat();
           },
           catch: (error) =>
             new LemonSqueezyError({

@@ -38,7 +38,7 @@ export const storePrompt = (provider: LemonSqueezy.LemonSqueezyImpl) =>
 
     return yield* Prompt.select({
       message: "Select Store to Migrate",
-      choices: stores.data.map((store) => ({
+      choices: stores.map((store) => ({
         value: store.id,
         title: store.attributes.name,
       })),
