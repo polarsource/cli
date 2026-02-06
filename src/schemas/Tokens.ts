@@ -30,8 +30,6 @@ export const Token = Schema.Struct({
   expiresAt: Schema.Date,
   scope: TokenScope,
   server: Schema.Literal("production", "sandbox"),
-  organizationId: Schema.optional(Schema.String),
-  organizationSlug: Schema.optional(Schema.String),
 });
 export type Token = Schema.Schema.Type<typeof Token>;
 export type TokenJSON = Schema.Schema.Encoded<typeof Token>;

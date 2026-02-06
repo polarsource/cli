@@ -1,6 +1,8 @@
 import { Args, Command } from "@effect/cli";
-import { Console, Effect, Redacted } from "effect";
+import { Effect, Either, Redacted, Schema } from "effect";
 import { EventSource } from "eventsource";
+import { organizationLoginPrompt } from "../prompts/organizations";
+import { ListenAck } from "../schemas/Events";
 import * as OAuth from "../services/oauth";
 
 const LISTEN_BASE_URL = "https://api.polar.sh/v1/cli/listen";
@@ -13,18 +15,8 @@ export const listen = Command.make("listen", { url }, ({ url }) =>
     const token = yield* oauth.resolveAccessToken("production");
     const accessToken = Redacted.value(token.token);
 
-    if (!token.organizationId) {
-      return yield* Effect.fail(
-        new OAuth.OAuthError({
-          message:
-            "No organization selected. Please run `polar login` first to select an organization.",
-        }),
-      );
-    }
-
-    const listenUrl = `${LISTEN_BASE_URL}/${token.organizationId}`;
-
-    yield* Console.log(`Listening for events, forwarding to ${url}...`);
+    const organization = yield* organizationLoginPrompt;
+    const listenUrl = `${LISTEN_BASE_URL}/${organization.id}`;
 
     yield* Effect.async<void, OAuth.OAuthError>((resume) => {
       const eventSource = new EventSource(listenUrl, {
@@ -50,6 +42,27 @@ export const listen = Command.make("listen", { url }, ({ url }) =>
           parsed = JSON.parse(event.data);
         } catch {
           console.error("Failed to parse event:", event.data);
+          return;
+        }
+
+        const ack = Schema.decodeUnknownEither(ListenAck)(parsed);
+
+        if (Either.isRight(ack)) {
+          const { secret } = ack.right;
+          const dim = "\x1b[2m";
+          const bold = "\x1b[1m";
+          const cyan = "\x1b[36m";
+          const reset = "\x1b[0m";
+
+          console.log("");
+          console.log(
+            `  ${bold}${cyan}Connected${reset}  ${bold}${organization.name}${reset}`,
+          );
+          console.log(`  ${dim}Secret${reset}     ${secret}`);
+          console.log(`  ${dim}Forwarding${reset} ${url}`);
+          console.log("");
+          console.log(`  ${dim}Waiting for events...${reset}`);
+          console.log("");
           return;
         }
 

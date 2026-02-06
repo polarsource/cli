@@ -1,5 +1,5 @@
 import { Command } from "@effect/cli";
-import { NodeContext, NodeRuntime } from "@effect/platform-node";
+import { BunContext, BunRuntime } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
 import { listen } from "./commands/listen";
 import { login } from "./commands/login";
@@ -23,7 +23,7 @@ const services = Layer.mergeAll(
   OAuth.layer,
   Polar.layer,
   Migration.layer,
-  NodeContext.layer
+  BunContext.layer
 );
 
-cli(process.argv).pipe(Effect.provide(services), NodeRuntime.runMain);
+cli(process.argv).pipe(Effect.provide(services), BunRuntime.runMain);

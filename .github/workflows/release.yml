@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: bun-darwin-arm64
+            artifact: polar-darwin-arm64
+            os: ubuntu-latest
+          - target: bun-darwin-x64
+            artifact: polar-darwin-x64
+            os: ubuntu-latest
+          - target: bun-linux-x64
+            artifact: polar-linux-x64
+            os: ubuntu-latest
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - name: Build binary
+        run: bun build ./src/cli.ts --compile --target=${{ matrix.target }} --outfile polar
+
+      - name: Package binary
+        run: tar -czf ${{ matrix.artifact }}.tar.gz polar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.tar.gz"
+          generate_release_notes: true

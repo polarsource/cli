@@ -85,5 +85,5 @@ export const organizationLoginPrompt = Effect.gen(function* () {
 
   const selected = organizations.find((org) => org.id === selectedId)!;
 
-  return { id: selected.id, slug: selected.slug };
+  return { id: selected.id, slug: selected.slug, name: selected.name };
 });

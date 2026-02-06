@@ -1,27 +1,42 @@
 // src/cli.ts
 import { Command as Command4 } from "@effect/cli";
-import { NodeContext, NodeRuntime } from "@effect/platform-node";
+import { BunContext, BunRuntime } from "@effect/platform-bun";
 import { Effect as Effect10, Layer as Layer5 } from "effect";
 
 // src/commands/listen.ts
 import { Args, Command } from "@effect/cli";
-import { Console, Effect as Effect2, Redacted as Redacted2 } from "effect";
+import { Effect as Effect4, Redacted as Redacted3, Schema as Schema5 } from "effect";
 import { EventSource } from "eventsource";
+
+// src/prompts/organizations.ts
+import { Prompt } from "@effect/cli";
+import { Effect as Effect3 } from "effect";
+
+// src/schemas/Organization.ts
+import { Schema } from "effect";
+var OrganizationCreate = Schema.Struct({
+  name: Schema.String,
+  slug: Schema.String
+});
+
+// src/services/polar.ts
+import { Polar as PolarSDK } from "@polar-sh/sdk";
+import { Context as Context2, Data as Data2, Effect as Effect2, Layer as Layer2, Redacted as Redacted2 } from "effect";
 
 // src/services/oauth.ts
 import { createHash, randomBytes } from "crypto";
 import { createServer } from "http";
 import path from "path";
 import { FileSystem, Path } from "@effect/platform";
-import { NodeFileSystem } from "@effect/platform-node";
-import { Context, Data, Effect, Layer, Redacted, Schema as Schema2 } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
+import { Context, Data, Effect, Layer, Redacted, Schema as Schema3 } from "effect";
 import open from "open";
 import os from "os";
 
 // src/schemas/Tokens.ts
-import { Schema } from "effect";
-var TokenScope = Schema.Array(
-  Schema.Literal(
+import { Schema as Schema2 } from "effect";
+var TokenScope = Schema2.Array(
+  Schema2.Literal(
     "web:read",
     "web:write",
     "openid",
@@ -42,19 +57,17 @@ var TokenScope = Schema.Array(
     "customers:read"
   )
 );
-var Token = Schema.Struct({
-  token: Schema.Redacted(Schema.String),
-  refreshToken: Schema.Redacted(Schema.String),
-  expiresIn: Schema.DurationFromMillis,
-  expiresAt: Schema.Date,
+var Token = Schema2.Struct({
+  token: Schema2.Redacted(Schema2.String),
+  refreshToken: Schema2.Redacted(Schema2.String),
+  expiresIn: Schema2.DurationFromMillis,
+  expiresAt: Schema2.Date,
   scope: TokenScope,
-  server: Schema.Literal("production", "sandbox"),
-  organizationId: Schema.optional(Schema.String),
-  organizationSlug: Schema.optional(Schema.String)
+  server: Schema2.Literal("production", "sandbox")
 });
-var Tokens = Schema.Struct({
-  production: Schema.optional(Token),
-  sandbox: Schema.optional(Token)
+var Tokens = Schema2.Struct({
+  production: Schema2.optional(Token),
+  sandbox: Schema2.optional(Token)
 });
 
 // src/services/oauth.ts
@@ -129,7 +142,7 @@ var OAuthError = class extends Data.TaggedError("OAuthError") {
 };
 var OAuth = class extends Context.Tag("OAuth")() {
 };
-var OAuthRequirementsLayer = Layer.mergeAll(NodeFileSystem.layer, Path.layer);
+var OAuthRequirementsLayer = Layer.mergeAll(BunFileSystem.layer, Path.layer);
 var make = Effect.gen(function* () {
   const getAccessToken = (server) => Effect.gen(function* () {
     const token = yield* readTokenFile;
@@ -170,19 +183,12 @@ var make = Effect.gen(function* () {
     }
     return yield* getAccessToken(server);
   }).pipe(Effect.provide(OAuthRequirementsLayer));
-  const setOrganization = (server, organizationId, organizationSlug) => Effect.gen(function* () {
-    const token = yield* getAccessToken(server);
-    const updatedToken = { ...token, organizationId, organizationSlug };
-    yield* writeToTokenFile(updatedToken);
-    return updatedToken;
-  }).pipe(Effect.provide(OAuthRequirementsLayer));
   return OAuth.of({
     login: login2,
     refresh,
     isAuthenticated,
     getAccessToken,
-    resolveAccessToken,
-    setOrganization
+    resolveAccessToken
   });
 });
 var layer = Layer.scoped(OAuth, make);
@@ -220,7 +226,7 @@ var writeToTokenFile = (token) => Effect.gen(function* () {
   });
   return yield* ensureTokenFile.pipe(
     Effect.andThen(
-      () => Schema2.encode(Tokens)(mergedTokens).pipe(
+      () => Schema3.encode(Tokens)(mergedTokens).pipe(
         Effect.map(
           (encoded) => new TextEncoder().encode(JSON.stringify(encoded))
         ),
@@ -243,7 +249,7 @@ var readTokenFile = Effect.gen(function* () {
   yield* Effect.logDebug("Reading token file...");
   return yield* ensureTokenFile.pipe(
     Effect.flatMap(() => fileSystem.readFileString(filePath)),
-    Effect.flatMap(Schema2.decode(Schema2.parseJson(Tokens))),
+    Effect.flatMap(Schema3.decode(Schema3.parseJson(Tokens))),
     Effect.catchAll(
       (error) => Effect.fail(
         new OAuthError({
@@ -343,7 +349,7 @@ var refreshAccessToken = (token) => Effect.gen(function* () {
       cause: error
     })
   });
-  return yield* Schema2.decodeUnknown(Token)({
+  return yield* Schema3.decodeUnknown(Token)({
     token: data.access_token,
     refreshToken: data.refresh_token,
     expiresIn: data.expires_in,
@@ -412,7 +418,7 @@ var redeemCodeForAccessToken = (server, responseUrl, requestState, codeVerifier)
     })
   });
   console.log(data);
-  return yield* Schema2.decodeUnknown(Token)({
+  return yield* Schema3.decodeUnknown(Token)({
     token: data.access_token,
     refreshToken: data.refresh_token,
     expiresIn: data.expires_in,
@@ -432,90 +438,7 @@ var redeemCodeForAccessToken = (server, responseUrl, requestState, codeVerifier)
   );
 });
 
-// src/commands/listen.ts
-var LISTEN_BASE_URL = "https://api.polar.sh/v1/cli/listen";
-var url = Args.text({ name: "url" });
-var listen = Command.make(
-  "listen",
-  { url },
-  ({ url: url2 }) => Effect2.gen(function* () {
-    const oauth = yield* OAuth;
-    const token = yield* oauth.resolveAccessToken("production");
-    const accessToken = Redacted2.value(token.token);
-    if (!token.organizationId) {
-      return yield* Effect2.fail(
-        new OAuthError({
-          message: "No organization selected. Please run `polar login` first to select an organization."
-        })
-      );
-    }
-    const listenUrl = `${LISTEN_BASE_URL}/${token.organizationId}`;
-    yield* Console.log(`Listening for events, forwarding to ${url2}...`);
-    yield* Effect2.async((resume) => {
-      const eventSource = new EventSource(listenUrl, {
-        fetch: (input, init) => fetch(input, {
-          ...init,
-          headers: {
-            ...init.headers,
-            Authorization: `Bearer ${accessToken}`
-          }
-        })
-      });
-      eventSource.onmessage = (event) => {
-        let parsed;
-        try {
-          parsed = JSON.parse(event.data);
-        } catch {
-          console.error("Failed to parse event:", event.data);
-          return;
-        }
-        console.log(parsed);
-        fetch(url2, {
-          method: "POST",
-          headers: parsed.headers,
-          body: JSON.stringify(parsed.payload?.payload)
-        }).then((res) => {
-          console.log(`>> ${res.status} ${res.statusText}`);
-        }).catch((err) => {
-          console.error(`>> Failed to forward event: ${err}`);
-        });
-      };
-      eventSource.onerror = (error) => {
-        eventSource.close();
-        resume(
-          Effect2.fail(
-            new OAuthError({
-              message: error.message ?? "Event stream error",
-              cause: error
-            })
-          )
-        );
-      };
-      return Effect2.sync(() => {
-        eventSource.close();
-      });
-    });
-  })
-);
-
-// src/commands/login.ts
-import { Command as Command2 } from "@effect/cli";
-import { Console as Console2, Effect as Effect5 } from "effect";
-
-// src/prompts/organizations.ts
-import { Prompt } from "@effect/cli";
-import { Effect as Effect4 } from "effect";
-
-// src/schemas/Organization.ts
-import { Schema as Schema3 } from "effect";
-var OrganizationCreate = Schema3.Struct({
-  name: Schema3.String,
-  slug: Schema3.String
-});
-
 // src/services/polar.ts
-import { Polar as PolarSDK } from "@polar-sh/sdk";
-import { Context as Context2, Data as Data2, Effect as Effect3, Layer as Layer2, Redacted as Redacted3 } from "effect";
 var SANDBOX_SERVER_URL = "https://sandbox-api.polar.sh";
 var PRODUCTION_SERVER_URL = "https://api.polar.sh";
 var PolarError = class extends Data2.TaggedError("PolarError") {
@@ -523,20 +446,20 @@ var PolarError = class extends Data2.TaggedError("PolarError") {
 var Polar = class extends Context2.Tag("Polar")() {
 };
 var PolarRequirementsLayer = Layer2.mergeAll(layer);
-var make2 = Effect3.gen(function* () {
+var make2 = Effect2.gen(function* () {
   const oauth = yield* OAuth;
-  const getClient = (server) => Effect3.gen(function* () {
+  const getClient = (server) => Effect2.gen(function* () {
     const token = yield* oauth.resolveAccessToken(server);
     const serverUrl = server === "production" ? PRODUCTION_SERVER_URL : SANDBOX_SERVER_URL;
     const client = new PolarSDK({
       serverURL: serverUrl,
-      accessToken: Redacted3.value(token.token)
+      accessToken: Redacted2.value(token.token)
     });
     return client;
   }).pipe(
-    Effect3.catchTag(
+    Effect2.catchTag(
       "OAuthError",
-      (error) => Effect3.fail(
+      (error) => Effect2.fail(
         new PolarError({
           message: "Failed to get Polar SDK client",
           cause: error
@@ -544,10 +467,10 @@ var make2 = Effect3.gen(function* () {
       )
     )
   );
-  const use = (fn) => Effect3.gen(function* () {
+  const use = (fn) => Effect2.gen(function* () {
     const client = yield* getClient("production");
     const result = fn(client);
-    return yield* Effect3.isEffect(result) ? result : Effect3.promise(() => result);
+    return yield* Effect2.isEffect(result) ? result : Effect2.promise(() => result);
   });
   return Polar.of({
     getClient,
@@ -576,14 +499,14 @@ var fetchAllPages = async (task) => {
 };
 
 // src/prompts/organizations.ts
-var selectOrganizationPrompt = Effect4.gen(function* () {
+var selectOrganizationPrompt = Effect3.gen(function* () {
   const polar = yield* Polar;
   const organizations = yield* polar.use(
     (client) => client.organizations.list({
       page: 1,
       limit: 100
     })
-  ).pipe(Effect4.map((organizations2) => organizations2.result.items));
+  ).pipe(Effect3.map((organizations2) => organizations2.result.items));
   return yield* Prompt.select({
     message: "Select Organization",
     choices: [
@@ -602,7 +525,7 @@ var organizationSlugPrompt = (name) => Prompt.text({
   message: "Organization Slug",
   default: slugify(name)
 });
-var createNewOrganizationPrompt = Effect4.gen(function* () {
+var createNewOrganizationPrompt = Effect3.gen(function* () {
   const polar = yield* Polar;
   const name = yield* organizationNamePrompt;
   const slug = yield* organizationSlugPrompt(name);
@@ -616,21 +539,21 @@ var createNewOrganizationPrompt = Effect4.gen(function* () {
   return organization.id;
 });
 var organizationPrompt = selectOrganizationPrompt.pipe(
-  Effect4.flatMap((organization) => {
+  Effect3.flatMap((organization) => {
     if (organization === "new") {
       return createNewOrganizationPrompt;
     }
-    return Effect4.succeed(organization);
+    return Effect3.succeed(organization);
   })
 );
-var organizationLoginPrompt = Effect4.gen(function* () {
+var organizationLoginPrompt = Effect3.gen(function* () {
   const polar = yield* Polar;
   const organizations = yield* polar.use(
     (client) => client.organizations.list({
       page: 1,
       limit: 100
     })
-  ).pipe(Effect4.map((organizations2) => organizations2.result.items));
+  ).pipe(Effect3.map((organizations2) => organizations2.result.items));
   const selectedId = yield* Prompt.select({
     message: "Select Organization",
     choices: organizations.map((organization) => ({
@@ -639,25 +562,100 @@ var organizationLoginPrompt = Effect4.gen(function* () {
     }))
   });
   const selected = organizations.find((org) => org.id === selectedId);
-  return { id: selected.id, slug: selected.slug };
+  return { id: selected.id, slug: selected.slug, name: selected.name };
 });
 
+// src/schemas/Events.ts
+import { Schema as Schema4 } from "effect";
+var ListenAck = Schema4.Struct({
+  key: Schema4.Literal("connected"),
+  ts: Schema4.Date,
+  secret: Schema4.String
+});
+
+// src/commands/listen.ts
+var LISTEN_BASE_URL = "https://api.polar.sh/v1/cli/listen";
+var url = Args.text({ name: "url" });
+var listen = Command.make(
+  "listen",
+  { url },
+  ({ url: url2 }) => Effect4.gen(function* () {
+    const oauth = yield* OAuth;
+    const token = yield* oauth.resolveAccessToken("production");
+    const accessToken = Redacted3.value(token.token);
+    const organization = yield* organizationLoginPrompt;
+    const listenUrl = `${LISTEN_BASE_URL}/${organization.id}`;
+    yield* Effect4.async((resume) => {
+      const eventSource = new EventSource(listenUrl, {
+        fetch: (input, init) => fetch(input, {
+          ...init,
+          headers: {
+            ...init.headers,
+            Authorization: `Bearer ${accessToken}`
+          }
+        })
+      });
+      eventSource.onmessage = (event) => {
+        let parsed;
+        try {
+          parsed = JSON.parse(event.data);
+        } catch {
+          console.error("Failed to parse event:", event.data);
+          return;
+        }
+        if (Schema5.is(ListenAck)(parsed)) {
+          const dim = "\x1B[2m";
+          const bold = "\x1B[1m";
+          const cyan = "\x1B[36m";
+          const reset = "\x1B[0m";
+          console.log("");
+          console.log(`  ${bold}${cyan}Connected${reset}  ${bold}${organization.name}${reset}`);
+          console.log(`  ${dim}Secret${reset}     ${parsed.secret}`);
+          console.log(`  ${dim}Forwarding${reset} ${url2}`);
+          console.log("");
+          console.log(`  ${dim}Waiting for events...${reset}`);
+          console.log("");
+          return;
+        }
+        console.log(parsed);
+        fetch(url2, {
+          method: "POST",
+          headers: parsed.headers,
+          body: JSON.stringify(parsed.payload?.payload)
+        }).then((res) => {
+          console.log(`>> ${res.status} ${res.statusText}`);
+        }).catch((err) => {
+          console.error(`>> Failed to forward event: ${err}`);
+        });
+      };
+      eventSource.onerror = (error) => {
+        eventSource.close();
+        resume(
+          Effect4.fail(
+            new OAuthError({
+              message: error.message ?? "Event stream error",
+              cause: error
+            })
+          )
+        );
+      };
+      return Effect4.sync(() => {
+        eventSource.close();
+      });
+    });
+  })
+);
+
 // src/commands/login.ts
+import { Command as Command2 } from "@effect/cli";
+import { Console, Effect as Effect5 } from "effect";
 var login = Command2.make(
   "login",
   {},
   () => Effect5.gen(function* () {
     const oauth = yield* OAuth;
     yield* oauth.login("production");
-    const organization = yield* organizationLoginPrompt;
-    yield* oauth.setOrganization(
-      "production",
-      organization.id,
-      organization.slug
-    );
-    yield* Console2.log(
-      `Successfully logged into Polar (organization: ${organization.slug})`
-    );
+    yield* Console.log("Successfully logged into Polar");
   })
 );
 
@@ -705,14 +703,14 @@ var storePrompt = (provider) => Effect6.gen(function* () {
 });
 
 // src/schemas/Migration.ts
-import { Schema as Schema4 } from "effect";
-var MigrationOrigin = Schema4.String.pipe(
-  Schema4.brand("MigrationOrigin")
+import { Schema as Schema6 } from "effect";
+var MigrationOrigin = Schema6.String.pipe(
+  Schema6.brand("MigrationOrigin")
 );
-var MigrationDestination = Schema4.String.pipe(
-  Schema4.brand("MigrationDestination")
+var MigrationDestination = Schema6.String.pipe(
+  Schema6.brand("MigrationDestination")
 );
-var MigrationContext = Schema4.Struct({
+var MigrationContext = Schema6.Struct({
   from: MigrationOrigin,
   to: MigrationDestination
 });
@@ -728,53 +726,53 @@ import {
   listStores,
   listVariants
 } from "@lemonsqueezy/lemonsqueezy.js";
-import { Context as Context3, Data as Data3, Effect as Effect7, Layer as Layer3, Schema as Schema7 } from "effect";
+import { Context as Context3, Data as Data3, Effect as Effect7, Layer as Layer3, Schema as Schema9 } from "effect";
 
 // src/schemas/Customer.ts
-import { Schema as Schema5 } from "effect";
-var CustomerCreate = Schema5.Struct({
-  name: Schema5.String,
-  email: Schema5.String,
-  billingAddress: Schema5.optional(
-    Schema5.Struct({
-      country: Schema5.String,
-      city: Schema5.NullOr(Schema5.String),
-      state: Schema5.NullOr(Schema5.String)
+import { Schema as Schema7 } from "effect";
+var CustomerCreate = Schema7.Struct({
+  name: Schema7.String,
+  email: Schema7.String,
+  billingAddress: Schema7.optional(
+    Schema7.Struct({
+      country: Schema7.String,
+      city: Schema7.NullOr(Schema7.String),
+      state: Schema7.NullOr(Schema7.String)
     })
   )
 });
 
 // src/schemas/Product.ts
-import { Schema as Schema6 } from "effect";
-var CreateProductPriceCustom = Schema6.mutable(
-  Schema6.Struct({
-    amountType: Schema6.Literal("custom"),
-    priceCurrency: Schema6.Literal("USD"),
-    minimumAmount: Schema6.optional(Schema6.Number),
-    maximumAmount: Schema6.optional(Schema6.Number),
-    presetAmount: Schema6.optional(Schema6.Number)
+import { Schema as Schema8 } from "effect";
+var CreateProductPriceCustom = Schema8.mutable(
+  Schema8.Struct({
+    amountType: Schema8.Literal("custom"),
+    priceCurrency: Schema8.Literal("USD"),
+    minimumAmount: Schema8.optional(Schema8.Number),
+    maximumAmount: Schema8.optional(Schema8.Number),
+    presetAmount: Schema8.optional(Schema8.Number)
   })
 );
-var CreateProductPriceFree = Schema6.mutable(
-  Schema6.Struct({
-    amountType: Schema6.Literal("free")
+var CreateProductPriceFree = Schema8.mutable(
+  Schema8.Struct({
+    amountType: Schema8.Literal("free")
   })
 );
-var CreateProductPriceFixed = Schema6.mutable(
-  Schema6.Struct({
-    amountType: Schema6.Literal("fixed"),
-    priceCurrency: Schema6.Literal("usd"),
-    priceAmount: Schema6.Number
+var CreateProductPriceFixed = Schema8.mutable(
+  Schema8.Struct({
+    amountType: Schema8.Literal("fixed"),
+    priceCurrency: Schema8.Literal("usd"),
+    priceAmount: Schema8.Number
   })
 );
-var ProductCreate = Schema6.mutable(
-  Schema6.Struct({
-    name: Schema6.String,
-    description: Schema6.String,
-    recurringInterval: Schema6.NullOr(Schema6.Literal("month", "year")),
-    prices: Schema6.mutable(
-      Schema6.Tuple(
-        Schema6.Union(
+var ProductCreate = Schema8.mutable(
+  Schema8.Struct({
+    name: Schema8.String,
+    description: Schema8.String,
+    recurringInterval: Schema8.NullOr(Schema8.Literal("month", "year")),
+    prices: Schema8.mutable(
+      Schema8.Tuple(
+        Schema8.Union(
           CreateProductPriceCustom,
           CreateProductPriceFree,
           CreateProductPriceFixed
@@ -883,7 +881,7 @@ var make3 = (apiKey) => Effect7.gen(function* () {
       })
     }).pipe(
       Effect7.map(parseCustomers),
-      Effect7.flatMap(Schema7.decodeUnknown(Schema7.Array(CustomerCreate))),
+      Effect7.flatMap(Schema9.decodeUnknown(Schema9.Array(CustomerCreate))),
       Effect7.catchTag(
         "ParseError",
         (error) => new LemonSqueezyError({
@@ -912,7 +910,7 @@ var make3 = (apiKey) => Effect7.gen(function* () {
       })
     }).pipe(
       Effect7.map(parseVariants),
-      Effect7.flatMap(Schema7.decodeUnknown(Schema7.Array(ProductCreate))),
+      Effect7.flatMap(Schema9.decodeUnknown(Schema9.Array(ProductCreate))),
       Effect7.catchTag(
         "ParseError",
         (error) => new LemonSqueezyError({
@@ -945,7 +943,7 @@ var createLemonClient = (apiKey) => Effect7.try(() => {
 });
 
 // src/services/migration/migrate.ts
-import { Context as Context4, Data as Data4, Effect as Effect8, Layer as Layer4, Schema as Schema8 } from "effect";
+import { Context as Context4, Data as Data4, Effect as Effect8, Layer as Layer4, Schema as Schema10 } from "effect";
 var MigrationError = class extends Data4.TaggedError("MigrationError") {
 };
 var Migration = class extends Context4.Tag("Migration")() {
@@ -957,7 +955,7 @@ var make4 = Effect8.gen(function* () {
       const _oauth = yield* OAuth;
       const providerProducts = provider.products(migration.from);
       yield* providerProducts.pipe(
-        Effect8.flatMap(Schema8.encode(Schema8.Array(ProductCreate))),
+        Effect8.flatMap(Schema10.encode(Schema10.Array(ProductCreate))),
         Effect8.mapError(
           (error) => new PolarError({
             message: "Failed to encode products",
@@ -995,7 +993,7 @@ var make4 = Effect8.gen(function* () {
       const _oauth = yield* OAuth;
       const providerCustomers = provider.customers(migration.from);
       yield* providerCustomers.pipe(
-        Effect8.flatMap(Schema8.encode(Schema8.Array(CustomerCreate))),
+        Effect8.flatMap(Schema10.encode(Schema10.Array(CustomerCreate))),
         Effect8.mapError(
           (error) => new PolarError({
             message: "Failed to encode customers",
@@ -1083,6 +1081,6 @@ var services = Layer5.mergeAll(
   layer,
   layer2,
   layer3,
-  NodeContext.layer
+  BunContext.layer
 );
-cli(process.argv).pipe(Effect10.provide(services), NodeRuntime.runMain);
+cli(process.argv).pipe(Effect10.provide(services), BunRuntime.runMain);

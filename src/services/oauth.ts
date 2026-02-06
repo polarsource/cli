@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { FileSystem, Path } from "@effect/platform";
-import { NodeFileSystem } from "@effect/platform-node";
+import { BunFileSystem } from "@effect/platform-bun";
 import type { TokenResponse } from "@polar-sh/sdk/models/components/tokenresponse.js";
 import { Context, Data, Effect, Layer, Redacted, Schema } from "effect";
 import open from "open";
@@ -95,9 +95,9 @@ const captureAccessTokenFromHTTPServer = (server: "production" | "sandbox") =>
 export class OAuthError extends Data.TaggedError("OAuthError")<{
   message: string;
   cause?: unknown;
-}> {}
+}> { }
 
-export class OAuth extends Context.Tag("OAuth")<OAuth, OAuthImpl>() {}
+export class OAuth extends Context.Tag("OAuth")<OAuth, OAuthImpl>() { }
 
 interface OAuthImpl {
   login: (
@@ -113,14 +113,9 @@ interface OAuthImpl {
   resolveAccessToken: (
     server: "production" | "sandbox",
   ) => Effect.Effect<Token, OAuthError, never>;
-  setOrganization: (
-    server: "production" | "sandbox",
-    organizationId: string,
-    organizationSlug: string,
-  ) => Effect.Effect<Token, OAuthError, never>;
 }
 
-const OAuthRequirementsLayer = Layer.mergeAll(NodeFileSystem.layer, Path.layer);
+const OAuthRequirementsLayer = Layer.mergeAll(BunFileSystem.layer, Path.layer);
 
 export const make = Effect.gen(function* () {
   const getAccessToken = (server: "production" | "sandbox") =>
@@ -182,25 +177,12 @@ export const make = Effect.gen(function* () {
       return yield* getAccessToken(server);
     }).pipe(Effect.provide(OAuthRequirementsLayer));
 
-  const setOrganization = (
-    server: "production" | "sandbox",
-    organizationId: string,
-    organizationSlug: string,
-  ) =>
-    Effect.gen(function* () {
-      const token = yield* getAccessToken(server);
-      const updatedToken = { ...token, organizationId, organizationSlug };
-      yield* writeToTokenFile(updatedToken);
-      return updatedToken;
-    }).pipe(Effect.provide(OAuthRequirementsLayer));
-
   return OAuth.of({
     login,
     refresh,
     isAuthenticated,
     getAccessToken,
     resolveAccessToken,
-    setOrganization,
   });
 });
 

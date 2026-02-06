@@ -5,3 +5,4 @@ bin
 .env*
 
 .idea/
+.DS_STORE
