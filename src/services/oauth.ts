@@ -95,9 +95,9 @@ const captureAccessTokenFromHTTPServer = (server: "production" | "sandbox") =>
 export class OAuthError extends Data.TaggedError("OAuthError")<{
   message: string;
   cause?: unknown;
-}> { }
+}> {}
 
-export class OAuth extends Context.Tag("OAuth")<OAuth, OAuthImpl>() { }
+export class OAuth extends Context.Tag("OAuth")<OAuth, OAuthImpl>() {}
 
 interface OAuthImpl {
   login: (
@@ -484,8 +484,6 @@ const redeemCodeForAccessToken = (
           cause: error,
         }),
     });
-
-    console.log(data);
 
     return yield* Schema.decodeUnknown(Token)({
       token: data.access_token,

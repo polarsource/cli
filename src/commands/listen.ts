@@ -2,7 +2,7 @@ import { Args, Command } from "@effect/cli";
 import { Effect, Either, Redacted, Schema } from "effect";
 import { EventSource } from "eventsource";
 import { organizationLoginPrompt } from "../prompts/organizations";
-import { ListenAck } from "../schemas/Events";
+import { ListenAck, ListenWebhookEvent } from "../schemas/Events";
 import * as OAuth from "../services/oauth";
 
 const LISTEN_BASE_URL = "https://api.polar.sh/v1/cli/listen";
@@ -31,21 +31,8 @@ export const listen = Command.make("listen", { url }, ({ url }) =>
       });
 
       eventSource.onmessage = (event) => {
-        let parsed: {
-          payload: {
-            payload: unknown;
-          };
-          headers: Record<string, string>;
-        };
-
-        try {
-          parsed = JSON.parse(event.data);
-        } catch {
-          console.error("Failed to parse event:", event.data);
-          return;
-        }
-
-        const ack = Schema.decodeUnknownEither(ListenAck)(parsed);
+        const json = JSON.parse(event.data);
+        const ack = Schema.decodeUnknownEither(ListenAck)(json);
 
         if (Either.isRight(ack)) {
           const { secret } = ack.right;
@@ -63,18 +50,27 @@ export const listen = Command.make("listen", { url }, ({ url }) =>
           console.log("");
           console.log(`  ${dim}Waiting for events...${reset}`);
           console.log("");
+
           return;
         }
 
-        console.log(parsed);
+        const webhookEvent =
+          Schema.decodeUnknownEither(ListenWebhookEvent)(json);
+
+        if (Either.isLeft(webhookEvent)) {
+          console.error(">> Failed to decode event");
+          return;
+        }
 
         fetch(url, {
           method: "POST",
-          headers: parsed.headers,
-          body: JSON.stringify(parsed.payload?.payload),
+          headers: webhookEvent.right.headers,
+          body: JSON.stringify(webhookEvent.right.payload.payload),
         })
           .then((res) => {
-            console.log(`>> ${res.status} ${res.statusText}`);
+            console.log(
+              `>> '${webhookEvent.right.payload.payload.type}' >> ${res.status} ${res.statusText}`,
+            );
           })
           .catch((err) => {
             console.error(`>> Failed to forward event: ${err}`);
