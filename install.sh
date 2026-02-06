@@ -51,7 +51,7 @@ get_latest_version() {
 }
 
 main() {
-  local platform version url tmpdir
+  local platform version url
 
   info "Detecting platform..."
   platform="$(detect_platform)"
