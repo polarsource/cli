@@ -87,7 +87,7 @@ const captureAccessTokenFromHTTPServer = (server: PolarEnvironment) =>
 				}
 			});
 
-			httpServer?.listen(3333, () => {
+			httpServer?.listen(3333, "127.0.0.1", () => {
 				open(authorizationUrl);
 			});
 		});
