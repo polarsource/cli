@@ -1,6 +1,7 @@
 import { Command } from "@effect/cli";
 import { BunContext, BunRuntime } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
+import { existsSync, renameSync, unlinkSync } from "fs";
 import { listen } from "./commands/listen";
 import { login } from "./commands/login";
 import { migrate } from "./commands/migrate";
@@ -31,6 +32,17 @@ const services = Layer.mergeAll(
   Migration.layer,
   BunContext.layer
 );
+
+// Clean up stale files from Windows self-update
+if (process.platform === "win32") {
+  // If .new exists, a previous update was interrupted — complete it
+  const pendingPath = process.execPath + ".new";
+  if (existsSync(pendingPath)) {
+    try { renameSync(pendingPath, process.execPath); } catch {}
+  }
+  try { unlinkSync(process.execPath + ".bak"); } catch {}
+  try { unlinkSync(pendingPath); } catch {}
+}
 
 showUpdateNotice();
 checkForUpdateInBackground();
