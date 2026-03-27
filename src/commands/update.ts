@@ -177,23 +177,46 @@ const downloadAndUpdate = (
 
         const binaryPath = process.execPath;
         const newBinaryPath = join(tempDir, "polar");
-        const tempBinaryPath = join(dirname(binaryPath), `.polar-update-${Date.now()}`);
+        const tempPath = join(dirname(binaryPath), `.polar-update-${Date.now()}`);
 
         yield* Console.log(`${dim}Replacing binary...${reset}`);
 
         yield* Effect.tryPromise({
           try: async () => {
-            const newBinary = await Bun.file(newBinaryPath).arrayBuffer();
-            await Bun.write(tempBinaryPath, newBinary);
-            await chmod(tempBinaryPath, 0o755);
-            await rename(tempBinaryPath, binaryPath);
+            await chmod(newBinaryPath, 0o755);
+
+            let needsSudo = false;
+            try {
+              const newBinary = await Bun.file(newBinaryPath).arrayBuffer();
+              await Bun.write(tempPath, newBinary);
+              await rename(tempPath, binaryPath);
+            } catch (e: any) {
+              unlink(tempPath).catch(() => {});
+              if (e?.code === "EACCES") {
+                needsSudo = true;
+              } else {
+                throw e;
+              }
+            }
+
+            if (needsSudo) {
+              const proc = Bun.spawn(["sudo", "mv", newBinaryPath, binaryPath], {
+                stdout: "inherit",
+                stderr: "inherit",
+                stdin: "inherit",
+              });
+              const exitCode = await proc.exited;
+              if (exitCode !== 0) {
+                throw new Error("sudo mv failed");
+              }
+            }
+
+            await chmod(binaryPath, 0o755);
           },
-          catch: async (e) => {
-            await unlink(tempBinaryPath).catch(() => {});
-            return new Error(
+          catch: (e) =>
+            new Error(
               `Failed to replace binary: ${e instanceof Error ? e.message : e}`,
-            );
-          },
+            ),
         });
 
         yield* Console.log("");
