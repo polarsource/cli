@@ -1,9 +1,9 @@
 import { Command } from "@effect/cli";
 import { Console, Effect, Schema } from "effect";
 import { createHash } from "crypto";
-import { chmod, mkdtemp, rm } from "fs/promises";
+import { chmod, mkdtemp, rename, rm, unlink } from "fs/promises";
 import { tmpdir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
 import { VERSION } from "../version";
 
 const REPO = "polarsource/cli";
@@ -177,19 +177,23 @@ const downloadAndUpdate = (
 
         const binaryPath = process.execPath;
         const newBinaryPath = join(tempDir, "polar");
+        const tempBinaryPath = join(dirname(binaryPath), `.polar-update-${Date.now()}`);
 
         yield* Console.log(`${dim}Replacing binary...${reset}`);
 
         yield* Effect.tryPromise({
           try: async () => {
             const newBinary = await Bun.file(newBinaryPath).arrayBuffer();
-            await Bun.write(binaryPath, newBinary);
-            await chmod(binaryPath, 0o755);
+            await Bun.write(tempBinaryPath, newBinary);
+            await chmod(tempBinaryPath, 0o755);
+            await rename(tempBinaryPath, binaryPath);
           },
-          catch: (e) =>
-            new Error(
+          catch: async (e) => {
+            await unlink(tempBinaryPath).catch(() => {});
+            return new Error(
               `Failed to replace binary: ${e instanceof Error ? e.message : e}`,
-            ),
+            );
+          },
         });
 
         yield* Console.log("");
