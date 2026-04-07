@@ -269,7 +269,11 @@ export const listen = Command.make(
               Schema.decodeUnknownEither(ListenWebhookEvent)(json);
 
             if (Either.isLeft(webhookEvent)) {
-              console.error(">> Failed to decode event");
+              const dim = "\x1b[2m";
+              const reset = "\x1b[0m";
+              const type = json?.type ?? json?.payload?.type ?? "unknown";
+              console.error(`>> Failed to decode event: ${dim}${type}${reset}`);
+              console.error(`   ${dim}${JSON.stringify(json).slice(0, 200)}${reset}`);
               return;
             }
 
