@@ -1,0 +1,23 @@
+name: Docker
+
+on:
+  push:
+    branches: [feat/headless-listen, main]
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: |
+            jamierpond/polar-cli:latest
+            jamierpond/polar-cli:${{ github.sha }}
