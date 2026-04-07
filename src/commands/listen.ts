@@ -54,9 +54,26 @@ const webhookSecretOption = Options.text("webhook-secret").pipe(
 
 /**
  * Re-sign a webhook payload using the standardwebhooks format.
- * This matches how @polar-sh/sdk's `validateEvent` verifies signatures:
- * HMAC-SHA256 with base64(secret) as the key, over "msgId.timestamp.body".
+ * HMAC-SHA256 over "msgId.timestamp.body".
+ *
+ * The secret can be:
+ *   - "whsec_<base64>" (Polar dashboard format) — strip prefix, base64-decode
+ *   - raw base64 string — base64-decode
+ *   - plain string (e.g. hex from `polar listen`) — use UTF-8 bytes directly
  */
+function decodeSecret(secret: string): Buffer {
+  if (secret.startsWith("whsec_")) {
+    return Buffer.from(secret.slice(6), "base64");
+  }
+  // Try base64 decode — if it round-trips cleanly, it's base64-encoded
+  const decoded = Buffer.from(secret, "base64");
+  if (decoded.length > 0 && decoded.toString("base64") === secret) {
+    return decoded;
+  }
+  // Plain string (hex, etc.) — use raw bytes
+  return Buffer.from(secret, "utf-8");
+}
+
 function signPayload(
   body: string,
   secret: string,
@@ -64,8 +81,8 @@ function signPayload(
   const msgId = `msg_${randomUUID()}`;
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const toSign = `${msgId}.${timestamp}.${body}`;
-  const key = Buffer.from(secret, "utf-8").toString("base64");
-  const sig = createHmac("sha256", Buffer.from(key, "base64"))
+  const key = decodeSecret(secret);
+  const sig = createHmac("sha256", key)
     .update(toSign)
     .digest("base64");
   return {
@@ -376,9 +393,11 @@ export const listen = Command.make(
               reconnectDelay * 2,
               MAX_RECONNECT_DELAY_MS,
             );
+            // Reset backoff to initial delay on reconnect — if the new
+            // connection stays healthy, the next disconnect starts fresh.
             return Effect.sleep(reconnectDelay).pipe(
               Effect.flatMap(() =>
-                listenWithRetry(token, false, nextDelay),
+                listenWithRetry(token, false, RECONNECT_DELAY_MS),
               ),
             );
           }),
