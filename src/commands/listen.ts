@@ -323,35 +323,60 @@ export const listen = Command.make(
           (error.cause as { code?: number }).code === 401) ||
         error.message.includes("401");
 
+      const RECONNECT_DELAY_MS = 3_000;
+      const MAX_RECONNECT_DELAY_MS = 30_000;
+
       const listenWithRetry = (
         token: string,
-        retried = false,
+        authRetried = false,
+        reconnectDelay = RECONNECT_DELAY_MS,
       ): Effect.Effect<void, OAuth.OAuthError, never> =>
         startListening(token).pipe(
           Effect.catchTag("OAuthError", (error) => {
-            if (retried || !isUnauthorized(error)) {
-              return Effect.fail(error);
+            // 401 — try refreshing the token once
+            if (isUnauthorized(error)) {
+              if (authRetried) return Effect.fail(error);
+
+              if (isPersonalToken) {
+                return Effect.fail(
+                  new OAuth.OAuthError({
+                    message:
+                      "Access token was rejected (401). Check that your token is valid and has the required scopes.",
+                  }),
+                );
+              }
+
+              return Effect.gen(function* () {
+                const oauth = yield* OAuth.OAuth;
+                const newToken = yield* oauth.login(environment);
+                return yield* listenWithRetry(
+                  Redacted.value(newToken.token),
+                  true,
+                );
+              });
             }
 
-            if (isPersonalToken) {
-              // Can't refresh a personal access token — just fail
-              return Effect.fail(
-                new OAuth.OAuthError({
-                  message:
-                    "Access token was rejected (401). Check that your token is valid and has the required scopes.",
-                }),
-              );
-            }
+            // Non-auth error (SSE disconnect, network hiccup) — reconnect
+            const yellow = "\x1b[33m";
+            const dim = "\x1b[2m";
+            const reset = "\x1b[0m";
+            const delaySec = (reconnectDelay / 1000).toFixed(0);
+            console.error(
+              `\n  ${yellow}Connection lost${reset} ${dim}(${error.message})${reset}`,
+            );
+            console.error(
+              `  ${dim}Reconnecting in ${delaySec}s...${reset}\n`,
+            );
 
-            // OAuth flow: try re-login
-            return Effect.gen(function* () {
-              const oauth = yield* OAuth.OAuth;
-              const newToken = yield* oauth.login(environment);
-              return yield* listenWithRetry(
-                Redacted.value(newToken.token),
-                true,
-              );
-            });
+            const nextDelay = Math.min(
+              reconnectDelay * 2,
+              MAX_RECONNECT_DELAY_MS,
+            );
+            return Effect.sleep(reconnectDelay).pipe(
+              Effect.flatMap(() =>
+                listenWithRetry(token, false, nextDelay),
+              ),
+            );
           }),
         );
 
