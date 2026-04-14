@@ -16,12 +16,23 @@ jobs:
           - target: bun-darwin-arm64
             artifact: polar-darwin-arm64
             os: ubuntu-latest
+            ext: tar.gz
+            binary: polar
           - target: bun-darwin-x64
             artifact: polar-darwin-x64
             os: ubuntu-latest
+            ext: tar.gz
+            binary: polar
           - target: bun-linux-x64
             artifact: polar-linux-x64
             os: ubuntu-latest
+            ext: tar.gz
+            binary: polar
+          - target: bun-windows-x64
+            artifact: polar-windows-x64
+            os: ubuntu-latest
+            ext: zip
+            binary: polar.exe
 
     runs-on: ${{ matrix.os }}
 
@@ -35,15 +46,20 @@ jobs:
       - run: bun install
 
       - name: Build binary
-        run: bun build ./src/cli.ts --compile --target=${{ matrix.target }} --outfile polar
+        run: bun build ./src/cli.ts --compile --target=${{ matrix.target }} --outfile ${{ matrix.binary }}
 
-      - name: Package binary
-        run: tar -czf ${{ matrix.artifact }}.tar.gz polar
+      - name: Package binary (tar.gz)
+        if: matrix.ext == 'tar.gz'
+        run: tar -czf ${{ matrix.artifact }}.tar.gz ${{ matrix.binary }}
+
+      - name: Package binary (zip)
+        if: matrix.ext == 'zip'
+        run: zip ${{ matrix.artifact }}.zip ${{ matrix.binary }}
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}.tar.gz
+          path: ${{ matrix.artifact }}.${{ matrix.ext }}
 
   release:
     needs: build
@@ -55,12 +71,12 @@ jobs:
           merge-multiple: true
 
       - name: Generate checksums
-        run: sha256sum *.tar.gz > checksums.txt
+        run: sha256sum polar-* > checksums.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            *.tar.gz
+            polar-*
             checksums.txt
           generate_release_notes: true

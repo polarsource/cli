@@ -1,6 +1,7 @@
 import { Command } from "@effect/cli";
 import { Console, Effect, Schema } from "effect";
 import { createHash } from "crypto";
+import { renameSync, unlinkSync } from "fs";
 import { chmod, mkdtemp, rm } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -30,6 +31,9 @@ function detectPlatform(): { os: string; arch: string } {
     case "linux":
       os = "linux";
       break;
+    case "win32":
+      os = "windows";
+      break;
     default:
       throw new Error(`Unsupported OS: ${platform}`);
   }
@@ -50,6 +54,10 @@ function detectPlatform(): { os: string; arch: string } {
     throw new Error("Linux arm64 is not yet supported");
   }
 
+  if (os === "windows" && normalizedArch === "arm64") {
+    throw new Error("Windows arm64 is not yet supported");
+  }
+
   return { os, arch: normalizedArch };
 }
 
@@ -65,8 +73,12 @@ const downloadAndUpdate = (
     const reset = "\x1b[0m";
 
     const { os, arch } = detectPlatform();
+    const binaryPath = process.execPath;
     const platform = `${os}-${arch}`;
-    const archiveName = `polar-${platform}.tar.gz`;
+    const isWindows = process.platform === "win32";
+    const archiveExt = isWindows ? "zip" : "tar.gz";
+    const binaryName = isWindows ? "polar.exe" : "polar";
+    const archiveName = `polar-${platform}.${archiveExt}`;
 
     const asset = release.assets.find((a) => a.name === archiveName);
     if (!asset) {
@@ -155,36 +167,76 @@ const downloadAndUpdate = (
 
         yield* Console.log(`${dim}Extracting...${reset}`);
 
-        const tar = Bun.spawn(["tar", "-xzf", archivePath, "-C", tempDir], {
-          stdout: "ignore",
-          stderr: "pipe",
-        });
-
-        const tarExitCode = yield* Effect.tryPromise({
-          try: () => tar.exited,
-          catch: () => new Error("Failed to extract archive"),
-        });
-
-        if (tarExitCode !== 0) {
-          const stderr = yield* Effect.tryPromise({
-            try: () => new Response(tar.stderr).text(),
-            catch: () => new Error("Failed to read tar stderr"),
-          });
-          return yield* Effect.fail(
-            new Error(`Failed to extract archive: ${stderr}`),
+        if (isWindows) {
+          const ps = Bun.spawn(
+            [
+              "powershell",
+              "-NoProfile",
+              "-Command",
+              `Expand-Archive -LiteralPath '${archivePath.replace(/'/g, "''")}' -DestinationPath '${tempDir.replace(/'/g, "''")}' -Force`,
+            ],
+            {
+              stdout: "ignore",
+              stderr: "pipe",
+            },
           );
+
+          const psExitCode = yield* Effect.tryPromise({
+            try: () => ps.exited,
+            catch: () => new Error("Failed to extract archive"),
+          });
+
+          if (psExitCode !== 0) {
+            const stderr = yield* Effect.tryPromise({
+              try: () => new Response(ps.stderr).text(),
+              catch: () => new Error("Failed to read extraction stderr"),
+            });
+            return yield* Effect.fail(
+              new Error(`Failed to extract archive: ${stderr}`),
+            );
+          }
+        } else {
+          const tar = Bun.spawn(["tar", "-xzf", archivePath, "-C", tempDir], {
+            stdout: "ignore",
+            stderr: "pipe",
+          });
+
+          const tarExitCode = yield* Effect.tryPromise({
+            try: () => tar.exited,
+            catch: () => new Error("Failed to extract archive"),
+          });
+
+          if (tarExitCode !== 0) {
+            const stderr = yield* Effect.tryPromise({
+              try: () => new Response(tar.stderr).text(),
+              catch: () => new Error("Failed to read tar stderr"),
+            });
+            return yield* Effect.fail(
+              new Error(`Failed to extract archive: ${stderr}`),
+            );
+          }
         }
 
-        const binaryPath = process.execPath;
-        const newBinaryPath = join(tempDir, "polar");
+        const newBinaryPath = join(tempDir, binaryName);
 
         yield* Console.log(`${dim}Replacing binary...${reset}`);
 
         yield* Effect.tryPromise({
           try: async () => {
             const newBinary = await Bun.file(newBinaryPath).arrayBuffer();
-            await Bun.write(binaryPath, newBinary);
-            await chmod(binaryPath, 0o755);
+            if (isWindows) {
+              const bakPath = binaryPath + ".bak";
+              const pendingPath = binaryPath + ".new";
+              await Bun.write(pendingPath, newBinary);
+              renameSync(binaryPath, bakPath);
+              renameSync(pendingPath, binaryPath);
+              try {
+                unlinkSync(bakPath);
+              } catch {}
+            } else {
+              await Bun.write(binaryPath, newBinary);
+              await chmod(binaryPath, 0o755);
+            }
           },
           catch: (e) =>
             new Error(
