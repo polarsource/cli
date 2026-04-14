@@ -30,10 +30,10 @@ jobs:
         include:
           - target: bun-darwin-arm64
             artifact: polar-darwin-arm64
-            os: ubuntu-latest
+            os: macos-latest
           - target: bun-darwin-x64
             artifact: polar-darwin-x64
-            os: ubuntu-latest
+            os: macos-latest
           - target: bun-linux-x64
             artifact: polar-linux-x64
             os: ubuntu-latest
