@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Draft verification tag to create, e.g. verify-signing-2026-04-16"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -154,6 +160,11 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' }}
+          name: ${{ github.event_name == 'workflow_dispatch' && format('Signing Verification {0}', inputs.tag_name) || github.ref_name }}
           files: |
             *.tar.gz
             *.zip
