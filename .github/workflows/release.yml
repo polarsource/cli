@@ -35,12 +35,18 @@ jobs:
           - target: bun-darwin-arm64
             archive: polar-darwin-arm64.zip
             os: macos-15
+            sign: true
+            notarize: true
           - target: bun-darwin-x64
             archive: polar-darwin-x64.zip
             os: macos-15
+            sign: true
+            notarize: true
           - target: bun-linux-x64
             archive: polar-linux-x64.tar.gz
             os: ubuntu-latest
+            sign: false
+            notarize: false
 
     runs-on: ${{ matrix.os }}
 
@@ -53,8 +59,53 @@ jobs:
 
       - run: bun install
 
+      - name: Validate macOS signing configuration
+        if: ${{ matrix.sign }}
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          test -n "$MACOS_CERTIFICATE_P12_BASE64" || { echo "Missing MACOS_CERTIFICATE_P12_BASE64 secret"; exit 1; }
+          test -n "$MACOS_CERTIFICATE_PASSWORD" || { echo "Missing MACOS_CERTIFICATE_PASSWORD secret"; exit 1; }
+          test -n "$MACOS_SIGNING_IDENTITY" || { echo "Missing MACOS_SIGNING_IDENTITY secret"; exit 1; }
+          test -n "$APP_STORE_CONNECT_API_KEY_P8" || { echo "Missing APP_STORE_CONNECT_API_KEY_P8 secret"; exit 1; }
+          test -n "$APP_STORE_CONNECT_API_KEY_ID" || { echo "Missing APP_STORE_CONNECT_API_KEY_ID secret"; exit 1; }
+          test -n "$APP_STORE_CONNECT_ISSUER_ID" || { echo "Missing APP_STORE_CONNECT_ISSUER_ID secret"; exit 1; }
+
+      - name: Import macOS signing certificate
+        if: ${{ matrix.sign }}
+        uses: apple-actions/import-codesign-certs@v6
+        with:
+          p12-file-base64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          p12-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+
       - name: Build binary
         run: bun build ./src/cli.ts --compile --target=${{ matrix.target }} --outfile polar
+
+      - name: Sign macOS binary
+        if: ${{ matrix.sign }}
+        env:
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: codesign --force --options runtime --sign "$MACOS_SIGNING_IDENTITY" --timestamp ./polar
+
+      - name: Verify macOS signature
+        if: ${{ matrix.sign }}
+        run: codesign --verify --strict --verbose=2 ./polar
+
+      - name: Write App Store Connect API key
+        if: ${{ matrix.notarize }}
+        env:
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+        run: |
+          key_path="$RUNNER_TEMP/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8"
+          printf '%s' "$APP_STORE_CONNECT_API_KEY_P8" > "$key_path"
+          chmod 600 "$key_path"
+          echo "APP_STORE_CONNECT_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
       - name: Package binary
         run: |
@@ -63,6 +114,18 @@ jobs:
           else
             tar -czf "${{ matrix.archive }}" polar
           fi
+
+      - name: Notarize macOS archive
+        if: ${{ matrix.notarize }}
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          xcrun notarytool submit "${{ matrix.archive }}" \
+            --key "$APP_STORE_CONNECT_API_KEY_PATH" \
+            --key-id "$APP_STORE_CONNECT_API_KEY_ID" \
+            --issuer "$APP_STORE_CONNECT_ISSUER_ID" \
+            --wait
 
       - uses: actions/upload-artifact@v4
         with:
