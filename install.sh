@@ -118,6 +118,11 @@ main() {
   fi
   chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
 
+  local tokens_file="${HOME}/.polar/tokens.json"
+  if [ -f "$tokens_file" ]; then
+    rm -f "$tokens_file"
+  fi
+
   info "Polar CLI ${version} installed successfully!"
   echo ""
   echo "  Run 'polar --help' to get started."

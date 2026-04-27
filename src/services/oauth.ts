@@ -148,6 +148,7 @@ export class OAuth extends Context.Tag("OAuth")<OAuth, OAuthImpl>() { }
 
 interface OAuthImpl {
 	login: (server: PolarEnvironment) => Effect.Effect<Token, OAuthError, never>;
+	logout: () => Effect.Effect<void, OAuthError, never>;
 	refresh: (token: Token) => Effect.Effect<Token, OAuthError, never>;
 	isAuthenticated: (
 		server: PolarEnvironment,
@@ -185,6 +186,9 @@ export const make = Effect.gen(function* () {
 
 			return savedToken;
 		}).pipe(Effect.scoped, Effect.provide(OAuthRequirementsLayer));
+
+	const logout = () =>
+		deleteTokenFile.pipe(Effect.provide(OAuthRequirementsLayer));
 
 	const refresh = (token: Token) =>
 		Effect.gen(function* () {
@@ -224,6 +228,7 @@ export const make = Effect.gen(function* () {
 
 	return OAuth.of({
 		login,
+		logout,
 		refresh,
 		isAuthenticated,
 		getAccessToken,
@@ -320,6 +325,17 @@ const saveToken = (token: Token) =>
 
 		return yield* writeToTokenFile(token).pipe(Effect.map(() => token));
 	});
+
+const deleteTokenFile = Effect.gen(function* () {
+	const fileSystem = yield* FileSystem.FileSystem;
+	const filePath = yield* tokenFilePath;
+
+	yield* Effect.logDebug("Deleting token file...");
+
+	return yield* fileSystem.remove(filePath).pipe(
+		Effect.catchAll(() => Effect.void),
+	);
+});
 
 const generateRandomString = Effect.sync(() => randomBytes(48).toString("hex"));
 
@@ -458,7 +474,7 @@ const refreshAccessToken = (token: Token) =>
 			server: token.server,
 		}).pipe(
 			Effect.catchTag("ParseError", (error) =>
-				Effect.die(
+				Effect.fail(
 					new OAuthError({
 						message: "Failed to parse token response into a Token Schema",
 						cause: error,
@@ -544,7 +560,7 @@ const redeemCodeForAccessToken = (
 			server,
 		}).pipe(
 			Effect.catchTag("ParseError", (error) =>
-				Effect.die(
+				Effect.fail(
 					new OAuthError({
 						message: "Failed to parse token response into a Token Schema",
 						cause: error,

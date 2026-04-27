@@ -4,6 +4,7 @@ import { createHash } from "crypto";
 import { chmod, mkdtemp, rename, rm, unlink } from "fs/promises";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
+import * as OAuth from "../services/oauth";
 import { VERSION } from "../version";
 
 const fsError = (e: unknown): Error =>
@@ -308,5 +309,8 @@ export const update = Command.make("update", {}, () =>
     }
 
     yield* downloadAndUpdate(release, latestVersion);
+
+    const oauth = yield* OAuth.OAuth;
+    yield* oauth.logout().pipe(Effect.catchAll(() => Effect.void));
   }),
 );

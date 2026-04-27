@@ -3,6 +3,7 @@ import { BunContext, BunRuntime } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
 import { listen } from "./commands/listen";
 import { login } from "./commands/login";
+import { logout } from "./commands/logout";
 import { migrate } from "./commands/migrate";
 import { update } from "./commands/update";
 import * as Migration from "./services/migration/migrate";
@@ -14,6 +15,7 @@ import { VERSION } from "./version";
 const mainCommand = Command.make("polar").pipe(
   Command.withSubcommands([
     login,
+    logout,
     migrate,
     listen,
     update
