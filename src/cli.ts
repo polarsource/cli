@@ -6,6 +6,7 @@ import { login } from "./commands/login";
 import { logout } from "./commands/logout";
 import { migrate } from "./commands/migrate";
 import { trigger } from "./commands/trigger";
+import { whoami } from "./commands/whoami";
 import { update } from "./commands/update";
 import * as Migration from "./services/migration/migrate";
 import * as OAuth from "./services/oauth";
@@ -20,6 +21,7 @@ const mainCommand = Command.make("polar").pipe(
     migrate,
     listen,
     trigger,
+    whoami,
     update
   ])
 );
