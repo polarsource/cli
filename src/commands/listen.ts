@@ -3,7 +3,11 @@ import { Effect, Either, Redacted, Schema } from "effect";
 import { EventSource } from "eventsource";
 import { environmentPrompt } from "../prompts/environment";
 import { organizationLoginPrompt } from "../prompts/organizations";
-import { ListenAck, ListenWebhookEvent } from "../schemas/Events";
+import {
+  ListenAck,
+  ListenReconnect,
+  ListenWebhookEvent,
+} from "../schemas/Events";
 import type { Token } from "../schemas/Tokens";
 import * as OAuth from "../services/oauth";
 
@@ -58,6 +62,12 @@ export const listen = Command.make("listen", { url }, ({ url }) =>
             return;
           }
 
+          const reconnect = Schema.decodeUnknownEither(ListenReconnect)(json);
+
+          if (Either.isRight(reconnect)) {
+            return;
+          }
+
           const webhookEvent =
             Schema.decodeUnknownEither(ListenWebhookEvent)(json);
 
@@ -84,6 +94,10 @@ export const listen = Command.make("listen", { url }, ({ url }) =>
         };
 
         eventSource.onerror = (error) => {
+          if (error.code === undefined) {
+            return;
+          }
+
           eventSource.close();
           resume(
             Effect.fail(
