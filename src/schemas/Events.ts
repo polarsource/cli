@@ -6,6 +6,10 @@ export const ListenAck = Schema.Struct({
   secret: Schema.String,
 });
 
+export const ListenReconnect = Schema.Struct({
+  type: Schema.Literal("reconnect"),
+});
+
 export const ListenWebhookEvent = Schema.Struct({
   id: Schema.String,
   key: Schema.String,
@@ -26,4 +30,4 @@ export const ListenWebhookEvent = Schema.Struct({
   }),
 });
 
-export const ListenEvent = Schema.Union(ListenAck, ListenWebhookEvent);
+export const ListenEvent = Schema.Union(ListenAck, ListenReconnect, ListenWebhookEvent);
