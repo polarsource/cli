@@ -2,7 +2,8 @@
 set -euo pipefail
 
 REPO="polarsource/cli"
-INSTALL_DIR="/usr/local/bin"
+DEFAULT_INSTALL_DIR="${HOME}/.local/bin"
+INSTALL_DIR="${INSTALL_DIR:-}"
 BINARY_NAME="polar"
 
 # Colors
@@ -59,8 +60,88 @@ get_archive_name() {
   esac
 }
 
+resolve_install_dir() {
+  if [ -n "$INSTALL_DIR" ]; then
+    echo "$INSTALL_DIR"
+    return
+  fi
+
+  local current_binary
+  current_binary="$(type -P "$BINARY_NAME" || true)"
+  if [ -n "$current_binary" ]; then
+    dirname "$current_binary"
+    return
+  fi
+
+  echo "$DEFAULT_INSTALL_DIR"
+}
+
+check_path() {
+  local install_dir="$1"
+  local shell_name
+
+  case ":${PATH}:" in
+    *":${install_dir}:"*) ;;
+    *)
+      warn "${install_dir} is not in your PATH."
+      echo ""
+
+      shell_name="$(basename "${SHELL:-}")"
+      case "$shell_name" in
+        zsh)
+          echo "  Add it by running:"
+          echo "    echo 'export PATH=\"${install_dir}:\$PATH\"' >> ~/.zshrc && source ~/.zshrc"
+          ;;
+        bash)
+          echo "  Add it by running:"
+          echo "    echo 'export PATH=\"${install_dir}:\$PATH\"' >> ~/.bashrc && source ~/.bashrc"
+          ;;
+        fish)
+          echo "  Add it by running:"
+          echo "    fish_add_path ${install_dir}"
+          ;;
+        *)
+          echo "  Add ${install_dir} to your PATH to use the polar command."
+          ;;
+      esac
+      echo ""
+      ;;
+  esac
+}
+
+ensure_install_dir() {
+  local dir="$1"
+
+  if [ -d "$dir" ]; then
+    return
+  fi
+
+  info "Creating install directory ${dir}..."
+  if mkdir -p "$dir" 2>/dev/null; then
+    return
+  fi
+
+  sudo mkdir -p "$dir"
+}
+
+install_binary() {
+  local source_path="$1"
+  local target_dir="$2"
+  local target_path="${target_dir}/${BINARY_NAME}"
+
+  if [ -w "$target_dir" ]; then
+    mv "$source_path" "$target_path"
+    chmod +x "$target_path"
+  else
+    sudo mv "$source_path" "$target_path"
+    sudo chmod +x "$target_path"
+  fi
+}
+
 main() {
   local platform version url
+
+  INSTALL_DIR="$(resolve_install_dir)"
 
   info "Detecting platform..."
   platform="$(detect_platform)"
@@ -111,12 +192,8 @@ main() {
   esac
 
   info "Installing to ${INSTALL_DIR}..."
-  if [ -w "$INSTALL_DIR" ]; then
-    mv "${tmpdir}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
-  else
-    sudo mv "${tmpdir}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
-  fi
-  chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
+  ensure_install_dir "$INSTALL_DIR"
+  install_binary "${tmpdir}/${BINARY_NAME}" "$INSTALL_DIR"
 
   local tokens_file="${HOME}/.polar/tokens.json"
   if [ -f "$tokens_file" ]; then
@@ -125,6 +202,7 @@ main() {
 
   info "Polar CLI ${version} installed successfully!"
   echo ""
+  check_path "$INSTALL_DIR"
   echo "  Run 'polar --help' to get started."
   echo ""
 }
