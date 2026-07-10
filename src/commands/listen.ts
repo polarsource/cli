@@ -5,6 +5,7 @@ import {
   EventSource,
   type EventSourceInit,
 } from "eventsource";
+import { parse, stringify } from "lossless-json";
 import { environmentPrompt } from "../prompts/environment";
 import { organizationLoginPrompt } from "../prompts/organizations";
 import {
@@ -55,6 +56,23 @@ export interface StartListeningOptions {
 
 const defaultCreateEventSource: CreateEventSource = (listenUrl, init) =>
   new EventSource(listenUrl, init);
+
+const hasPayload = (value: unknown): value is { payload: unknown } =>
+  typeof value === "object" && value !== null && "payload" in value;
+
+/**
+ * Rebuilds the exact bytes Polar signed for the webhook body embedded in a
+ * listen stream frame, or `undefined` when the frame carries no body.
+ */
+export const signedWebhookBody = (frame: string): string | undefined => {
+  const parsed = parse(frame);
+
+  if (!hasPayload(parsed) || !hasPayload(parsed.payload)) {
+    return undefined;
+  }
+
+  return stringify(parsed.payload.payload);
+};
 
 /**
  * Opens the CLI listen stream and forwards incoming webhook events to the local
@@ -130,8 +148,9 @@ export const startListening = ({
 
         const webhookEvent =
           Schema.decodeUnknownEither(ListenWebhookEvent)(json);
+        const body = signedWebhookBody(event.data);
 
-        if (Either.isLeft(webhookEvent)) {
+        if (Either.isLeft(webhookEvent) || body === undefined) {
           console.error(">> Failed to decode event");
           return;
         }
@@ -139,7 +158,7 @@ export const startListening = ({
         forward(forwardUrl, {
           method: "POST",
           headers: webhookEvent.right.headers,
-          body: JSON.stringify(webhookEvent.right.payload.payload),
+          body,
         })
           .then((res) => {
             const cyan = "\x1b[36m";
