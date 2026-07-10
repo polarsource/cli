@@ -3,6 +3,7 @@ import { Effect, Fiber } from "effect";
 import {
   type CreateEventSource,
   type ListenEventSource,
+  signedWebhookBody,
   startListening,
 } from "./listen";
 
@@ -33,6 +34,11 @@ class FakeEventSource implements ListenEventSource {
   /** Simulate the server pushing a message frame. */
   emit(data: unknown) {
     this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent);
+  }
+
+  /** Simulate the server pushing a message frame with exact raw bytes. */
+  emitRaw(data: string) {
+    this.onmessage?.({ data } as MessageEvent);
   }
 }
 
@@ -75,6 +81,32 @@ afterEach(async () => {
   await Promise.all(fibers.map((fiber) => Effect.runPromise(Fiber.interrupt(fiber))));
   fibers.length = 0;
   FakeEventSource.instances = [];
+});
+
+describe("signedWebhookBody", () => {
+  test("rebuilds the compact body from a spaced frame, keeping number literals", () => {
+    const frame =
+      '{"key": "webhook.created", "payload": {"webhook_event_id": "whid_1", "payload": {"type": "customer.state_changed", "data": {"consumed_units": 0.0, "credited_units": 10.50, "balance": 1e3, "count": 42}}}}';
+
+    expect(signedWebhookBody(frame)).toBe(
+      '{"type":"customer.state_changed","data":{"consumed_units":0.0,"credited_units":10.50,"balance":1e3,"count":42}}',
+    );
+  });
+
+  test("preserves key order and nested structure", () => {
+    const frame =
+      '{"payload": {"payload": {"b": [1.0, {"z": 2.50}], "a": null, "ok": true}}}';
+
+    expect(signedWebhookBody(frame)).toBe(
+      '{"b":[1.0,{"z":2.50}],"a":null,"ok":true}',
+    );
+  });
+
+  test("returns undefined when the frame carries no body", () => {
+    expect(signedWebhookBody('{"key": "connected", "secret": "whsec"}')).toBeUndefined();
+    expect(signedWebhookBody('{"payload": {}}')).toBeUndefined();
+    expect(signedWebhookBody('"just a string"')).toBeUndefined();
+  });
 });
 
 describe("startListening", () => {
@@ -136,6 +168,23 @@ describe("startListening", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify(payload),
+      }),
+    );
+  });
+
+  test("forwards the signed bytes for usage metering payloads", () => {
+    const forward = mock(okResponse) as unknown as typeof fetch;
+    run({ forward });
+
+    instanceAt(0).emitRaw(
+      '{"id": "evt_1", "key": "webhook", "payload": {"webhook_event_id": "whid_1", "payload": {"type": "customer.state_changed", "timestamp": "2026-01-01T00:00:00Z", "data": {"active_meters": [{"consumed_units": 0.0, "credited_units": 10.50, "balance": 1e3}]}}}, "headers": {"user-agent": "polar.sh webhooks", "content-type": "application/json", "webhook-id": "wh_1", "webhook-timestamp": "12345", "webhook-signature": "sig"}}',
+    );
+
+    expect(forward).toHaveBeenCalledWith(
+      "http://localhost:3000/webhook",
+      expect.objectContaining({
+        method: "POST",
+        body: '{"type":"customer.state_changed","timestamp":"2026-01-01T00:00:00Z","data":{"active_meters":[{"consumed_units":0.0,"credited_units":10.50,"balance":1e3}]}}',
       }),
     );
   });
