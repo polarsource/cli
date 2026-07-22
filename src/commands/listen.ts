@@ -5,6 +5,7 @@ import {
   EventSource,
   type EventSourceInit,
 } from "eventsource";
+import { parseLossless, stringifyLossless } from "../lossless";
 import { environmentPrompt } from "../prompts/environment";
 import { organizationLoginPrompt } from "../prompts/organizations";
 import {
@@ -55,6 +56,34 @@ export interface StartListeningOptions {
 
 const defaultCreateEventSource: CreateEventSource = (listenUrl, init) =>
   new EventSource(listenUrl, init);
+
+/**
+ * Rebuilds the forwarded request body from the raw SSE frame instead of the
+ * decoded event. The webhook signature was computed over the payload's
+ * original serialized bytes; re-serializing the decoded object with
+ * `JSON.stringify` changes number formatting (`1200.0` becomes `1200`) and
+ * breaks signature verification at the receiving endpoint. Returns null when
+ * the frame doesn't have the expected shape.
+ */
+const extractSignedBody = (frameData: string): string | null => {
+  try {
+    const frame = parseLossless(frameData);
+    if (!(frame instanceof Map)) {
+      return null;
+    }
+    const payload = frame.get("payload");
+    if (!(payload instanceof Map)) {
+      return null;
+    }
+    const webhookPayload = payload.get("payload");
+    if (webhookPayload === undefined) {
+      return null;
+    }
+    return stringifyLossless(webhookPayload);
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Opens the CLI listen stream and forwards incoming webhook events to the local
@@ -139,7 +168,9 @@ export const startListening = ({
         forward(forwardUrl, {
           method: "POST",
           headers: webhookEvent.right.headers,
-          body: JSON.stringify(webhookEvent.right.payload.payload),
+          body:
+            extractSignedBody(event.data) ??
+            JSON.stringify(webhookEvent.right.payload.payload),
         })
           .then((res) => {
             const cyan = "\x1b[36m";

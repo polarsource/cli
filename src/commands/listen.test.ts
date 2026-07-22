@@ -34,6 +34,11 @@ class FakeEventSource implements ListenEventSource {
   emit(data: unknown) {
     this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent);
   }
+
+  /** Simulate the server pushing a pre-serialized message frame. */
+  emitRaw(data: string) {
+    this.onmessage?.({ data } as MessageEvent);
+  }
 }
 
 /** Returns the event source at `index`, asserting it exists. */
@@ -137,6 +142,28 @@ describe("startListening", () => {
         method: "POST",
         body: JSON.stringify(payload),
       }),
+    );
+  });
+
+  test("forwards the payload bytes the signature was computed over", () => {
+    const forward = mock(okResponse) as unknown as typeof fetch;
+    run({ forward });
+
+    // The payload as originally serialized (and signed) by the server:
+    // compact, raw UTF-8, float meter values. The SSE frame re-serializes it
+    // Python-style (spaces, \uXXXX escapes, but float formatting intact); the
+    // forwarded body must reproduce the original bytes, so whole-number
+    // floats may not collapse to integers.
+    const original =
+      '{"type":"customer.state_changed","timestamp":"2026-01-01T00:00:00Z","data":{"name":"Café","consumed_units":1200.0,"balance":0.0}}';
+
+    instanceAt(0).emitRaw(
+      '{"id": "evt_1", "key": "webhook", "payload": {"webhook_event_id": "whid_1", "payload": {"type": "customer.state_changed", "timestamp": "2026-01-01T00:00:00Z", "data": {"name": "Caf\\u00e9", "consumed_units": 1200.0, "balance": 0.0}}}, "headers": {"user-agent": "polar.sh webhooks", "content-type": "application/json", "webhook-id": "wh_1", "webhook-timestamp": "12345", "webhook-signature": "sig"}}',
+    );
+
+    expect(forward).toHaveBeenCalledWith(
+      "http://localhost:3000/webhook",
+      expect.objectContaining({ method: "POST", body: original }),
     );
   });
 
