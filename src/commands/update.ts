@@ -123,6 +123,36 @@ export function getReleaseArchiveName(platform: {
   return platform.os === "darwin" ? `${baseName}.zip` : `${baseName}.tar.gz`;
 }
 
+type ReleaseAsset = { name: string; browser_download_url: string };
+
+/**
+ * Finds the release asset matching a platform, tolerant of archive-extension
+ * changes across releases (fixes #18).
+ *
+ * `polar update` runs the asset lookup baked into the *currently installed*
+ * binary. Before v1.3.4 darwin releases shipped `.tar.gz`, from v1.3.4 on
+ * they ship `.zip`. Anyone still running a pre-v1.3.4 binary hard-fails on
+ * update forever after, because their binary's `getReleaseArchiveName`
+ * always builds the old `.tar.gz` name, which no longer exists in newer
+ * releases, with no fallback. Same failure mode would recur on any future
+ * naming change. This tries the exact expected name first (fast path, no
+ * behavior change for the common case), then falls back to any archive
+ * for the same os/arch regardless of extension.
+ */
+export function findReleaseAsset(
+  assets: readonly ReleaseAsset[],
+  platform: { os: string; arch: string },
+): ReleaseAsset | undefined {
+  const preferredName = getReleaseArchiveName(platform);
+  const exact = assets.find((a) => a.name === preferredName);
+  if (exact) return exact;
+
+  const prefix = `polar-${platform.os}-${platform.arch}.`;
+  return assets.find(
+    (a) => a.name.startsWith(prefix) && /\.(zip|tar\.gz)$/.test(a.name),
+  );
+}
+
 export function getArchiveExtractionCommand(
   archivePath: string,
   destinationDir: string,
@@ -151,14 +181,19 @@ const downloadAndUpdate = (
 
     const { os, arch } = detectPlatform();
     const platform = `${os}-${arch}`;
-    const archiveName = getReleaseArchiveName({ os, arch });
 
-    const asset = release.assets.find((a) => a.name === archiveName);
+    const asset = findReleaseAsset(release.assets, { os, arch });
     if (!asset) {
       return yield* Effect.fail(
-        new Error(`No release asset found for platform: ${platform}`),
+        new Error(
+          `No release asset found for platform: ${platform}. Your ` +
+            `installed binary may predate a change in release asset ` +
+            `naming. Try a clean reinstall: ` +
+            `curl -fsSL https://polar.sh/install.sh | bash`,
+        ),
       );
     }
+    const archiveName = asset.name;
 
     const checksumsAsset = release.assets.find(
       (a) => a.name === "checksums.txt",

@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { Effect } from "effect";
 import {
+  findReleaseAsset,
   getArchiveExtractionCommand,
   getReleaseArchiveName,
   replaceBinary,
@@ -27,6 +28,49 @@ describe("getReleaseArchiveName", () => {
     expect(getReleaseArchiveName({ os: "linux", arch: "x64" })).toBe(
       "polar-linux-x64.tar.gz",
     );
+  });
+});
+
+describe("findReleaseAsset", () => {
+  test("prefers the exact expected archive name when present", () => {
+    const assets = [
+      { name: "polar-darwin-arm64.zip", browser_download_url: "zip-url" },
+      { name: "polar-darwin-arm64.tar.gz", browser_download_url: "targz-url" },
+      { name: "checksums.txt", browser_download_url: "checksums-url" },
+    ];
+    const found = findReleaseAsset(assets, { os: "darwin", arch: "arm64" });
+    expect(found?.name).toBe("polar-darwin-arm64.zip");
+  });
+
+  test("falls back to a different extension for the same platform (issue #18)", () => {
+    // Reproduces the darwin .tar.gz -> .zip rename (v1.3.4): a binary
+    // built when releases still shipped .tar.gz must still find an
+    // update once the release only ships .zip.
+    const assets = [
+      { name: "polar-darwin-arm64.zip", browser_download_url: "zip-url" },
+      { name: "polar-linux-x64.tar.gz", browser_download_url: "linux-url" },
+      { name: "checksums.txt", browser_download_url: "checksums-url" },
+    ];
+    const found = findReleaseAsset(assets, { os: "darwin", arch: "arm64" });
+    expect(found?.name).toBe("polar-darwin-arm64.zip");
+    expect(found?.browser_download_url).toBe("zip-url");
+  });
+
+  test("does not match a different platform's asset", () => {
+    const assets = [
+      { name: "polar-linux-x64.tar.gz", browser_download_url: "linux-url" },
+      { name: "checksums.txt", browser_download_url: "checksums-url" },
+    ];
+    const found = findReleaseAsset(assets, { os: "darwin", arch: "arm64" });
+    expect(found).toBeUndefined();
+  });
+
+  test("returns undefined when no asset matches the platform at all", () => {
+    const assets = [
+      { name: "checksums.txt", browser_download_url: "checksums-url" },
+    ];
+    const found = findReleaseAsset(assets, { os: "darwin", arch: "arm64" });
+    expect(found).toBeUndefined();
   });
 });
 
