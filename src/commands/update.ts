@@ -2,25 +2,36 @@ import { createHash } from "node:crypto";
 import { chmod, mkdtemp, rename, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { Console, Effect, Schema } from "effect";
+import { Console, Data, Effect, Schema } from "effect";
 import { Command } from "effect/unstable/cli";
 import * as OAuth from "../services/oauth";
 import { VERSION } from "../version";
 
-const fsError = (e: unknown) =>
-	Object.assign(new Error(e instanceof Error ? e.message : String(e)), {
+export class UpdateError extends Data.TaggedError("UpdateError")<{
+	message: string;
+	cause?: unknown;
+	code?: unknown;
+}> {}
+
+const fsError = (cause: unknown) =>
+	new UpdateError({
+		message: cause instanceof Error ? cause.message : String(cause),
+		cause,
 		code:
-			typeof e === "object" && e !== null && "code" in e ? e.code : undefined,
+			typeof cause === "object" && cause !== null && "code" in cause
+				? cause.code
+				: undefined,
 	});
 
 export const replaceBinary = (
 	newBinaryPath: string,
 	binaryPath: string,
-): Effect.Effect<void, Error> =>
+): Effect.Effect<void, UpdateError> =>
 	Effect.gen(function* () {
 		yield* Effect.tryPromise({
 			try: () => chmod(newBinaryPath, 0o755),
-			catch: () => new Error("Failed to chmod new binary"),
+			catch: (cause) =>
+				new UpdateError({ message: "Failed to chmod new binary", cause }),
 		});
 
 		const tempPath = join(dirname(binaryPath), `.polar-update-${Date.now()}`);
@@ -55,10 +66,11 @@ export const replaceBinary = (
 							);
 							const exitCode = yield* Effect.tryPromise({
 								try: () => proc.exited,
-								catch: () => new Error("Failed to run sudo mv"),
+								catch: (cause) =>
+									new UpdateError({ message: "Failed to run sudo mv", cause }),
 							});
 							if (exitCode !== 0) {
-								return yield* Effect.fail(new Error("sudo mv failed"));
+								return yield* new UpdateError({ message: "sudo mv failed" });
 							}
 						})
 					: Effect.fail(e),
@@ -67,7 +79,8 @@ export const replaceBinary = (
 
 		yield* Effect.tryPromise({
 			try: () => chmod(binaryPath, 0o755),
-			catch: () => new Error("Failed to chmod binary"),
+			catch: (cause) =>
+				new UpdateError({ message: "Failed to chmod binary", cause }),
 		});
 	});
 
@@ -158,21 +171,24 @@ const downloadAndUpdate = (
 
 		const asset = release.assets.find((a) => a.name === archiveName);
 		if (!asset) {
-			return yield* Effect.fail(
-				new Error(`No release asset found for platform: ${platform}`),
-			);
+			return yield* new UpdateError({
+				message: `No release asset found for platform: ${platform}`,
+			});
 		}
 
 		const checksumsAsset = release.assets.find(
 			(a) => a.name === "checksums.txt",
 		);
 		if (!checksumsAsset) {
-			return yield* Effect.fail(new Error("No checksums.txt found in release"));
+			return yield* new UpdateError({
+				message: "No checksums.txt found in release",
+			});
 		}
 
 		const tempDir = yield* Effect.tryPromise({
 			try: () => mkdtemp(join(tmpdir(), "polar-update-")),
-			catch: () => new Error("Failed to create temp directory"),
+			catch: (cause) =>
+				new UpdateError({ message: "Failed to create temp directory", cause }),
 		});
 
 		yield* Effect.ensuring(
@@ -183,21 +199,26 @@ const downloadAndUpdate = (
 					try: () =>
 						fetch(asset.browser_download_url).then((res) => {
 							if (!res.ok)
-								throw new Error(
-									`Download failed: ${res.status} ${res.statusText}`,
-								);
+								throw new UpdateError({
+									message: `Download failed: ${res.status} ${res.statusText}`,
+								});
 							return res.arrayBuffer();
 						}),
-					catch: (e) =>
-						new Error(
-							`Failed to download binary: ${e instanceof Error ? e.message : e}`,
-						),
+					catch: (cause) =>
+						new UpdateError({
+							message: `Failed to download binary: ${cause instanceof Error ? cause.message : cause}`,
+							cause,
+						}),
 				});
 
 				const archivePath = join(tempDir, archiveName);
 				yield* Effect.tryPromise({
 					try: () => Bun.write(archivePath, archiveBuffer),
-					catch: () => new Error("Failed to write archive to disk"),
+					catch: (cause) =>
+						new UpdateError({
+							message: "Failed to write archive to disk",
+							cause,
+						}),
 				});
 
 				yield* Console.log(`${dim}Verifying checksum...${reset}`);
@@ -205,10 +226,17 @@ const downloadAndUpdate = (
 				const checksumsText = yield* Effect.tryPromise({
 					try: () =>
 						fetch(checksumsAsset.browser_download_url).then((res) => {
-							if (!res.ok) throw new Error("Failed to download checksums");
+							if (!res.ok)
+								throw new UpdateError({
+									message: "Failed to download checksums",
+								});
 							return res.text();
 						}),
-					catch: () => new Error("Failed to download checksums.txt"),
+					catch: (cause) =>
+						new UpdateError({
+							message: "Failed to download checksums.txt",
+							cause,
+						}),
 				});
 
 				const expectedChecksum = checksumsText
@@ -217,15 +245,19 @@ const downloadAndUpdate = (
 					?.split(/\s+/)[0];
 
 				if (!expectedChecksum) {
-					return yield* Effect.fail(
-						new Error(`No checksum found for ${archiveName}`),
-					);
+					return yield* new UpdateError({
+						message: `No checksum found for ${archiveName}`,
+					});
 				}
 
 				const archiveData = yield* Effect.tryPromise({
 					try: () =>
 						Bun.file(archivePath).arrayBuffer() as Promise<ArrayBuffer>,
-					catch: () => new Error("Failed to read archive for checksum"),
+					catch: (cause) =>
+						new UpdateError({
+							message: "Failed to read archive for checksum",
+							cause,
+						}),
 				});
 
 				const hash = createHash("sha256");
@@ -233,11 +265,9 @@ const downloadAndUpdate = (
 				const actualChecksum = hash.digest("hex");
 
 				if (expectedChecksum !== actualChecksum) {
-					return yield* Effect.fail(
-						new Error(
-							`Checksum mismatch!\n  Expected: ${expectedChecksum}\n  Got:      ${actualChecksum}`,
-						),
-					);
+					return yield* new UpdateError({
+						message: `Checksum mismatch!\n  Expected: ${expectedChecksum}\n  Got:      ${actualChecksum}`,
+					});
 				}
 
 				yield* Console.log(`${dim}Extracting...${reset}`);
@@ -252,17 +282,22 @@ const downloadAndUpdate = (
 
 				const extractExitCode = yield* Effect.tryPromise({
 					try: () => extract.exited,
-					catch: () => new Error("Failed to extract archive"),
+					catch: (cause) =>
+						new UpdateError({ message: "Failed to extract archive", cause }),
 				});
 
 				if (extractExitCode !== 0) {
 					const stderr = yield* Effect.tryPromise({
 						try: () => new Response(extract.stderr).text(),
-						catch: () => new Error("Failed to read archive extractor stderr"),
+						catch: (cause) =>
+							new UpdateError({
+								message: "Failed to read archive extractor stderr",
+								cause,
+							}),
 					});
-					return yield* Effect.fail(
-						new Error(`Failed to extract archive: ${stderr}`),
-					);
+					return yield* new UpdateError({
+						message: `Failed to extract archive: ${stderr}`,
+					});
 				}
 
 				const binaryPath = process.execPath;
@@ -297,7 +332,11 @@ export const update = Command.make("update", {}, () =>
 				fetch(`https://api.github.com/repos/${REPO}/releases/latest`).then(
 					(res) => res.json(),
 				),
-			catch: () => new Error("Failed to fetch latest release from GitHub"),
+			catch: (cause) =>
+				new UpdateError({
+					message: "Failed to fetch latest release from GitHub",
+					cause,
+				}),
 		});
 
 		const release = yield* Schema.decodeUnknownEffect(GitHubRelease)(response);

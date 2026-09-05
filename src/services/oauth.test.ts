@@ -19,6 +19,24 @@ afterEach(() => {
 });
 
 describe("OAuth error mapping", () => {
+	test("yields OAuthError directly when a refresh request is rejected", async () => {
+		fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
+			new Response("invalid_grant", { status: 400 }),
+		);
+
+		const program = Effect.gen(function* () {
+			const oauth = yield* OAuth.OAuth;
+			return yield* oauth.refresh(token);
+		}).pipe(Effect.provide(OAuth.layer));
+
+		await expect(Effect.runPromise(program)).rejects.toMatchObject({
+			_tag: "OAuthError",
+			message:
+				"Problem encountered refreshing the access token: 400, invalid_grant",
+		});
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
+	});
+
 	test("wraps v4 SchemaError as OAuthError when a refresh response is invalid", async () => {
 		fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
 			Response.json({

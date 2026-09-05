@@ -177,11 +177,9 @@ export const make = Effect.gen(function* () {
 			const token = yield* readTokenFile;
 
 			if (!token || !token[server]) {
-				return yield* Effect.fail(
-					new OAuthError({
-						message: "No access token found for the selected server",
-					}),
-				);
+				return yield* new OAuthError({
+					message: "No access token found for the selected server",
+				});
 			}
 
 			return token[server];
@@ -262,13 +260,12 @@ const ensureTokenFile = Effect.gen(function* () {
 			})
 			.pipe(Effect.andThen(fileSystem.writeFileString(filePath, "{}"))),
 	).pipe(
-		Effect.catch((error) =>
-			Effect.fail(
+		Effect.mapError(
+			(error) =>
 				new OAuthError({
 					message: "Failed to ensure token file exists",
 					cause: error,
 				}),
-			),
 		),
 	);
 });
@@ -296,13 +293,12 @@ const writeToTokenFile = (token: Token) =>
 					Effect.andThen((encoded) => fileSystem.writeFile(filePath, encoded)),
 				),
 			),
-			Effect.catch((error) =>
-				Effect.fail(
+			Effect.mapError(
+				(error) =>
 					new OAuthError({
 						message: "Failed to write token to file",
 						cause: error,
 					}),
-				),
 			),
 		);
 	});
@@ -316,13 +312,12 @@ const readTokenFile = Effect.gen(function* () {
 	return yield* ensureTokenFile.pipe(
 		Effect.flatMap(() => fileSystem.readFileString(filePath)),
 		Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(Tokens))),
-		Effect.catch((error) =>
-			Effect.fail(
+		Effect.mapError(
+			(error) =>
 				new OAuthError({
 					message: "Failed to read token file",
 					cause: error,
 				}),
-			),
 		),
 	);
 });
@@ -397,11 +392,9 @@ const getLoginResult = (
 		const state = url.searchParams.get("state");
 
 		if (!code || !state) {
-			return yield* Effect.fail(
-				new OAuthError({
-					message: "Authorization code or state is missing in the response URL",
-				}),
-			);
+			return yield* new OAuthError({
+				message: "Authorization code or state is missing in the response URL",
+			});
 		}
 
 		return [code, state];
@@ -412,11 +405,9 @@ const refreshAccessToken = (token: Token) =>
 		const refreshToken = token.refreshToken;
 
 		if (!refreshToken) {
-			return yield* Effect.fail(
-				new OAuthError({
-					message: "No refresh token found",
-				}),
-			);
+			return yield* new OAuthError({
+				message: "No refresh token found",
+			});
 		}
 		const { clientId } = getClientCredentials(token.server);
 		const params = new URLSearchParams({
@@ -457,11 +448,9 @@ const refreshAccessToken = (token: Token) =>
 					}),
 			});
 
-			return yield* Effect.fail(
-				new OAuthError({
-					message: `Problem encountered refreshing the access token: ${response.status}, ${details}`,
-				}),
-			);
+			return yield* new OAuthError({
+				message: `Problem encountered refreshing the access token: ${response.status}, ${details}`,
+			});
 		}
 
 		const data = yield* Effect.tryPromise({
@@ -543,11 +532,9 @@ const redeemCodeForAccessToken = (
 					}),
 			});
 
-			return yield* Effect.fail(
-				new OAuthError({
-					message: `Problem encountered redeeming the code for tokens: ${response.status}, ${details}`,
-				}),
-			);
+			return yield* new OAuthError({
+				message: `Problem encountered redeeming the code for tokens: ${response.status}, ${details}`,
+			});
 		}
 
 		const data = yield* Effect.tryPromise({

@@ -63,7 +63,7 @@ const withRetry = async <T>(
 
 export const fetchAllPages = async <T>(
 	task: (pageNumber: number) => Promise<{
-		data?: T[];
+		data?: T[] | undefined;
 		lastPage: number;
 	}>,
 	options: { batchSize?: number; delayMs?: number } = {},

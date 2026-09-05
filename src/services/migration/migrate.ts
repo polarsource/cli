@@ -2,7 +2,6 @@ import { Context, Data, Effect, Layer, Schema } from "effect";
 import { CustomerCreate } from "../../schemas/Customer";
 import type { MigrationContext } from "../../schemas/Migration";
 import { ProductCreate } from "../../schemas/Product";
-import * as OAuth from "../oauth";
 import * as Polar from "../polar";
 import type * as LemonSqueezy from "./lemon/provider";
 
@@ -15,19 +14,11 @@ export interface MigrationImpl {
 	products: (
 		provider: LemonSqueezy.LemonSqueezyImpl,
 		migration: MigrationContext,
-	) => Effect.Effect<
-		void,
-		LemonSqueezy.LemonSqueezyError | Polar.PolarError | OAuth.OAuthError,
-		Polar.Polar | OAuth.OAuth
-	>;
+	) => Effect.Effect<void, LemonSqueezy.LemonSqueezyError | Polar.PolarError>;
 	customers: (
 		provider: LemonSqueezy.LemonSqueezyImpl,
 		migration: MigrationContext,
-	) => Effect.Effect<
-		void,
-		LemonSqueezy.LemonSqueezyError | Polar.PolarError | OAuth.OAuthError,
-		Polar.Polar | OAuth.OAuth
-	>;
+	) => Effect.Effect<void, LemonSqueezy.LemonSqueezyError | Polar.PolarError>;
 }
 
 export class Migration extends Context.Service<Migration, MigrationImpl>()(
@@ -35,11 +26,11 @@ export class Migration extends Context.Service<Migration, MigrationImpl>()(
 ) {}
 
 export const make = Effect.gen(function* () {
+	const polar = yield* Polar.Polar;
+
 	return Migration.of({
 		products: (provider, migration) =>
 			Effect.gen(function* () {
-				const polar = yield* Polar.Polar;
-				yield* OAuth.OAuth;
 				const providerProducts = provider.products(migration.from);
 
 				yield* providerProducts.pipe(
@@ -81,8 +72,6 @@ export const make = Effect.gen(function* () {
 			}),
 		customers: (provider, migration) =>
 			Effect.gen(function* () {
-				const polar = yield* Polar.Polar;
-				yield* OAuth.OAuth;
 				const providerCustomers = provider.customers(migration.from);
 
 				yield* providerCustomers.pipe(
@@ -125,4 +114,6 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layer = Layer.effect(Migration, make);
+export const layer = Layer.effect(Migration, make).pipe(
+	Layer.provide(Polar.layer),
+);

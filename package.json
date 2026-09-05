@@ -5,6 +5,7 @@
 	"bin": "bin/cli.js",
 	"type": "module",
 	"scripts": {
+		"prepare": "effect-language-service patch",
 		"build": "tsup ./src/cli.ts --format esm --outDir bin",
 		"dev": "tsc --watch",
 		"typecheck": "tsc --noEmit",

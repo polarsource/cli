@@ -99,11 +99,9 @@ export const organizationLoginPrompt = (
 
 		const selected = organizations.find((org) => org.id === selectedId);
 		if (!selected) {
-			return yield* Effect.fail(
-				new Polar.PolarError({
-					message: "Selected organization was not found",
-				}),
-			);
+			return yield* new Polar.PolarError({
+				message: "Selected organization was not found",
+			});
 		}
 
 		return { id: selected.id, slug: selected.slug, name: selected.name };

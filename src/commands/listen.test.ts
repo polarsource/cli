@@ -16,7 +16,12 @@ class FakeEventSource implements ListenEventSource {
 	url: string;
 	init: { fetch: typeof fetch };
 	onmessage: ((event: MessageEvent) => void) | null = null;
-	onerror: ((event: { code?: number; message?: string }) => void) | null = null;
+	onerror:
+		| ((event: {
+				code?: number | undefined;
+				message?: string | undefined;
+		  }) => void)
+		| null = null;
 	closed = false;
 
 	constructor(url: string, init: { fetch: typeof fetch }) {
