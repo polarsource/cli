@@ -1,6 +1,6 @@
 import type {
-  ListCustomers,
-  ListVariants,
+	ListCustomers,
+	ListVariants,
 } from "@lemonsqueezy/lemonsqueezy.js";
 import type { ProductPriceCustomCreate } from "@polar-sh/sdk/models/components/productpricecustomcreate.js";
 import type { ProductPriceFixedCreate } from "@polar-sh/sdk/models/components/productpricefixedcreate.js";
@@ -8,78 +8,78 @@ import type { ProductPriceFreeCreate } from "@polar-sh/sdk/models/components/pro
 import type { SubscriptionRecurringInterval } from "@polar-sh/sdk/models/components/subscriptionrecurringinterval.js";
 
 export const parseCustomers = (customers: ListCustomers["data"]) =>
-  customers.map((customer) => ({
-    name: customer.attributes.name,
-    email: customer.attributes.email,
-    billingAddress: customer.attributes.country
-      ? {
-          country: customer.attributes.country,
-          city: customer.attributes.city,
-          state: customer.attributes.region,
-        }
-      : undefined,
-  })) ?? [];
+	customers.map((customer) => ({
+		name: customer.attributes.name,
+		email: customer.attributes.email,
+		billingAddress: customer.attributes.country
+			? {
+					country: customer.attributes.country,
+					city: customer.attributes.city,
+					state: customer.attributes.region,
+				}
+			: undefined,
+	})) ?? [];
 
 const parseInterval = (
-  interval: ListVariants["data"][number]["attributes"]["interval"]
+	interval: ListVariants["data"][number]["attributes"]["interval"],
 ): SubscriptionRecurringInterval | null => {
-  switch (interval) {
-    case "month":
-      return "month";
-    case "year":
-      return "year";
-    default:
-      return null;
-  }
+	switch (interval) {
+		case "month":
+			return "month";
+		case "year":
+			return "year";
+		default:
+			return null;
+	}
 };
 
 export const parseVariants = (variants: ListVariants["data"]) =>
-  variants.map((variant) => ({
-    name: variant.attributes.name,
-    description: variant.attributes.description,
-    prices: [parsePrice(variant)],
-    recurringInterval: parseInterval(variant.attributes.interval),
-  })) ?? [];
+	variants.map((variant) => ({
+		name: variant.attributes.name,
+		description: variant.attributes.description,
+		prices: [parsePrice(variant)],
+		recurringInterval: parseInterval(variant.attributes.interval),
+	})) ?? [];
 
 export const parsePrice = (
-  variant: ListVariants["data"][number]
+	variant: ListVariants["data"][number],
 ):
-  | ProductPriceFixedCreate
-  | ProductPriceFreeCreate
-  | ProductPriceCustomCreate => {
-  const priceCurrency = "usd";
-  const priceAmount = variant.attributes.price;
+	| ProductPriceFixedCreate
+	| ProductPriceFreeCreate
+	| ProductPriceCustomCreate => {
+	const priceCurrency = "usd";
+	const priceAmount = variant.attributes.price;
 
-  if (priceAmount > 0) {
-    return {
-      amountType: "fixed",
-      priceAmount,
-      priceCurrency,
-    };
-  }
+	if (priceAmount > 0) {
+		return {
+			amountType: "fixed",
+			priceAmount,
+			priceCurrency,
+		};
+	}
 
-  const payWhatYouWant = variant.attributes.pay_what_you_want;
+	const payWhatYouWant = variant.attributes.pay_what_you_want;
 
-  if (payWhatYouWant) {
-    return {
-      amountType: "custom",
-      priceAmount,
-      priceCurrency,
-      minimumAmount:
-        variant.attributes.min_price < 50 ? 50 : variant.attributes.min_price,
-      presetAmount: variant.attributes.suggested_price,
-    } as ProductPriceCustomCreate;
-  }
+	if (payWhatYouWant) {
+		return {
+			amountType: "custom",
+			priceAmount,
+			priceCurrency,
+			minimumAmount:
+				variant.attributes.min_price < 50 ? 50 : variant.attributes.min_price,
+			presetAmount: variant.attributes.suggested_price,
+		} as ProductPriceCustomCreate;
+	}
 
-  if (priceAmount > 0) {
-    return {
-      amountType: "fixed",
-      priceAmount,
-      priceCurrency,
-    } as ProductPriceFixedCreate;
-  }
+	if (priceAmount > 0) {
+		return {
+			amountType: "fixed",
+			priceAmount,
+			priceCurrency,
+		} as ProductPriceFixedCreate;
+	}
 
-  return {
-    amountType: "free",
-  };
+	return {
+		amountType: "free",
+	};
 };

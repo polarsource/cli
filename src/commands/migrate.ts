@@ -1,5 +1,5 @@
-import { Command, Options, Prompt } from "@effect/cli";
 import { Effect } from "effect";
+import { Command, Flag, Prompt } from "effect/unstable/cli";
 import {
 	apiKeyPrompt,
 	migrationPrompt,
@@ -49,7 +49,7 @@ export const migrate = Command.make("migrate", {}, () =>
 	}),
 );
 
-export const LemonSqueezyAPIKey = Options.redacted("lemonSqueezyAPIKey");
+export const LemonSqueezyAPIKey = Flag.redacted("lemonSqueezyAPIKey");
 
 const resolveProvider = (
 	provider: "lemonSqueezy" | "paddle" | "stripe",

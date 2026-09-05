@@ -1,5 +1,5 @@
-import { Prompt } from "@effect/cli";
 import { Effect } from "effect";
+import { Prompt } from "effect/unstable/cli";
 import { OrganizationCreate } from "../schemas/Organization";
 import type { PolarEnvironment } from "../services/oauth";
 import * as Polar from "../services/polar";
@@ -97,7 +97,14 @@ export const organizationLoginPrompt = (
 			})),
 		});
 
-		const selected = organizations.find((org) => org.id === selectedId)!;
+		const selected = organizations.find((org) => org.id === selectedId);
+		if (!selected) {
+			return yield* Effect.fail(
+				new Polar.PolarError({
+					message: "Selected organization was not found",
+				}),
+			);
+		}
 
 		return { id: selected.id, slug: selected.slug, name: selected.name };
 	});

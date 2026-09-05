@@ -1,8 +1,8 @@
 import { Schema } from "effect";
 
 export const OrganizationCreate = Schema.Struct({
-  name: Schema.String,
-  slug: Schema.String,
+	name: Schema.String,
+	slug: Schema.String,
 });
 
-export type OrganizationCreate = Schema.Schema.Type<typeof OrganizationCreate>;
+export type OrganizationCreate = typeof OrganizationCreate.Type;

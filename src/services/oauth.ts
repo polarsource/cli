@@ -1,12 +1,20 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
+import os from "node:os";
 import path from "node:path";
-import { FileSystem, Path } from "@effect/platform";
 import { BunFileSystem } from "@effect/platform-bun";
 import type { TokenResponse } from "@polar-sh/sdk/models/components/tokenresponse.js";
-import { Context, Data, Effect, Layer, Redacted, Schema } from "effect";
+import {
+	Context,
+	Data,
+	Effect,
+	FileSystem,
+	Layer,
+	Path,
+	Redacted,
+	Schema,
+} from "effect";
 import open from "open";
-import os from "os";
 import { Token, Tokens } from "../schemas/Tokens";
 import type { KeysToSnakeCase } from "../types";
 
@@ -24,68 +32,68 @@ const PRODUCTION_TOKEN_URL = "https://api.polar.sh/v1/oauth2/token";
 
 const config = {
 	scopes: [
-		'benefits:read',
-		'benefits:write',
-		'checkout_links:read',
-		'checkout_links:write',
-		'checkouts:read',
-		'checkouts:write',
-		'custom_fields:read',
-		'custom_fields:write',
-		'customer_meters:read',
-		'customer_portal:read',
-		'customer_portal:write',
-		'customer_seats:read',
-		'customer_seats:write',
-		'customer_sessions:write',
-		'customers:read',
-		'customers:write',
-		'discounts:read',
-		'discounts:write',
-		'disputes:read',
-		'email',
-		'events:read',
-		'events:write',
-		'files:read',
-		'files:write',
-		'license_keys:read',
-		'license_keys:write',
-		'member_sessions:write',
-		'members:read',
-		'members:write',
-		'meters:read',
-		'meters:write',
-		'metrics:read',
-		'metrics:write',
-		'notification_recipients:read',
-		'notification_recipients:write',
-		'notifications:read',
-		'notifications:write',
-		'openid',
-		'orders:read',
-		'orders:write',
-		'organization_access_tokens:read',
-		'organization_access_tokens:write',
-		'organizations:read',
-		'organizations:write',
-		'payments:read',
-		'payouts:read',
-		'payouts:write',
-		'products:read',
-		'products:write',
-		'profile',
-		'refunds:read',
-		'refunds:write',
-		'subscriptions:read',
-		'subscriptions:write',
-		'transactions:read',
-		'transactions:write',
-		'user:read',
-		'user:write',
-		'wallets:read',
-		'wallets:write',
-		'webhooks:read',
-		'webhooks:write',
+		"benefits:read",
+		"benefits:write",
+		"checkout_links:read",
+		"checkout_links:write",
+		"checkouts:read",
+		"checkouts:write",
+		"custom_fields:read",
+		"custom_fields:write",
+		"customer_meters:read",
+		"customer_portal:read",
+		"customer_portal:write",
+		"customer_seats:read",
+		"customer_seats:write",
+		"customer_sessions:write",
+		"customers:read",
+		"customers:write",
+		"discounts:read",
+		"discounts:write",
+		"disputes:read",
+		"email",
+		"events:read",
+		"events:write",
+		"files:read",
+		"files:write",
+		"license_keys:read",
+		"license_keys:write",
+		"member_sessions:write",
+		"members:read",
+		"members:write",
+		"meters:read",
+		"meters:write",
+		"metrics:read",
+		"metrics:write",
+		"notification_recipients:read",
+		"notification_recipients:write",
+		"notifications:read",
+		"notifications:write",
+		"openid",
+		"orders:read",
+		"orders:write",
+		"organization_access_tokens:read",
+		"organization_access_tokens:write",
+		"organizations:read",
+		"organizations:write",
+		"payments:read",
+		"payouts:read",
+		"payouts:write",
+		"products:read",
+		"products:write",
+		"profile",
+		"refunds:read",
+		"refunds:write",
+		"subscriptions:read",
+		"subscriptions:write",
+		"transactions:read",
+		"transactions:write",
+		"user:read",
+		"user:write",
+		"wallets:read",
+		"wallets:write",
+		"webhooks:read",
+		"webhooks:write",
 	],
 	redirectUrl: "http://127.0.0.1:3333/oauth/callback",
 };
@@ -101,7 +109,7 @@ const captureAccessTokenFromHTTPServer = (server: PolarEnvironment) =>
 			codeChallenge,
 		);
 
-		let httpServer: Server | null;
+		let httpServer: Server | null = null;
 
 		// Close the HTTP server when the effect finalizes
 		yield* Effect.addFinalizer(() => {
@@ -113,7 +121,7 @@ const captureAccessTokenFromHTTPServer = (server: PolarEnvironment) =>
 			return Effect.logDebug("Temporary HTTP Server Closed");
 		});
 
-		const accessToken = yield* Effect.async<Token, OAuthError>((resume) => {
+		const accessToken = yield* Effect.callback<Token, OAuthError>((resume) => {
 			httpServer = createServer((request, response) => {
 				if (httpServer !== null) {
 					// Complete the incoming HTTP request when a login response is received
@@ -142,9 +150,9 @@ const captureAccessTokenFromHTTPServer = (server: PolarEnvironment) =>
 export class OAuthError extends Data.TaggedError("OAuthError")<{
 	message: string;
 	cause?: unknown;
-}> { }
+}> {}
 
-export class OAuth extends Context.Tag("OAuth")<OAuth, OAuthImpl>() { }
+export class OAuth extends Context.Service<OAuth, OAuthImpl>()("OAuth") {}
 
 interface OAuthImpl {
 	login: (server: PolarEnvironment) => Effect.Effect<Token, OAuthError, never>;
@@ -236,7 +244,7 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layer = Layer.scoped(OAuth, make);
+export const layer = Layer.effect(OAuth, make);
 
 const tokenFilePath = Effect.gen(function* () {
 	const path = yield* Path.Path;
@@ -247,14 +255,14 @@ const ensureTokenFile = Effect.gen(function* () {
 	const fileSystem = yield* FileSystem.FileSystem;
 	const filePath = yield* tokenFilePath;
 
-	return yield* Effect.orElse(fileSystem.access(filePath), () =>
+	return yield* Effect.catch(fileSystem.access(filePath), () =>
 		fileSystem
 			.makeDirectory(path.dirname(filePath), {
 				recursive: true,
 			})
 			.pipe(Effect.andThen(fileSystem.writeFileString(filePath, "{}"))),
 	).pipe(
-		Effect.catchAll((error) =>
+		Effect.catch((error) =>
 			Effect.fail(
 				new OAuthError({
 					message: "Failed to ensure token file exists",
@@ -281,14 +289,14 @@ const writeToTokenFile = (token: Token) =>
 
 		return yield* ensureTokenFile.pipe(
 			Effect.andThen(() =>
-				Schema.encode(Tokens)(mergedTokens).pipe(
+				Schema.encodeEffect(Tokens)(mergedTokens).pipe(
 					Effect.map((encoded) =>
 						new TextEncoder().encode(JSON.stringify(encoded)),
 					),
 					Effect.andThen((encoded) => fileSystem.writeFile(filePath, encoded)),
 				),
 			),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new OAuthError({
 						message: "Failed to write token to file",
@@ -307,8 +315,8 @@ const readTokenFile = Effect.gen(function* () {
 
 	return yield* ensureTokenFile.pipe(
 		Effect.flatMap(() => fileSystem.readFileString(filePath)),
-		Effect.flatMap(Schema.decode(Schema.parseJson(Tokens))),
-		Effect.catchAll((error) =>
+		Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(Tokens))),
+		Effect.catch((error) =>
 			Effect.fail(
 				new OAuthError({
 					message: "Failed to read token file",
@@ -332,9 +340,9 @@ const deleteTokenFile = Effect.gen(function* () {
 
 	yield* Effect.logDebug("Deleting token file...");
 
-	return yield* fileSystem.remove(filePath).pipe(
-		Effect.catchAll(() => Effect.void),
-	);
+	return yield* fileSystem
+		.remove(filePath)
+		.pipe(Effect.catch(() => Effect.void));
 });
 
 const generateRandomString = Effect.sync(() => randomBytes(48).toString("hex"));
@@ -348,8 +356,8 @@ const generateHash = (value: string) =>
 const getClientCredentials = (server: PolarEnvironment) =>
 	server === "production"
 		? {
-			clientId: PRODUCTION_CLIENT_ID,
-		}
+				clientId: PRODUCTION_CLIENT_ID,
+			}
 		: { clientId: SANDBOX_CLIENT_ID };
 
 const buildAuthorizationUrl = (
@@ -372,7 +380,7 @@ const buildAuthorizationUrl = (
 			state,
 			code_challenge: codeChallenge,
 			code_challenge_method: "S256",
-			sub_type: 'user'
+			sub_type: "user",
 		});
 
 		const url = `${baseUrl}?${params.toString()}`;
@@ -465,7 +473,7 @@ const refreshAccessToken = (token: Token) =>
 				}),
 		});
 
-		return yield* Schema.decodeUnknown(Token)({
+		return yield* Schema.decodeUnknownEffect(Token)({
 			token: data.access_token,
 			refreshToken: data.refresh_token,
 			expiresIn: data.expires_in,
@@ -473,7 +481,7 @@ const refreshAccessToken = (token: Token) =>
 			scope: data.scope.split(" "),
 			server: token.server,
 		}).pipe(
-			Effect.catchTag("ParseError", (error) =>
+			Effect.catchTag("SchemaError", (error) =>
 				Effect.fail(
 					new OAuthError({
 						message: "Failed to parse token response into a Token Schema",
@@ -551,7 +559,7 @@ const redeemCodeForAccessToken = (
 				}),
 		});
 
-		return yield* Schema.decodeUnknown(Token)({
+		return yield* Schema.decodeUnknownEffect(Token)({
 			token: data.access_token,
 			refreshToken: data.refresh_token,
 			expiresIn: data.expires_in,
@@ -559,7 +567,7 @@ const redeemCodeForAccessToken = (
 			scope: data.scope.split(" "),
 			server,
 		}).pipe(
-			Effect.catchTag("ParseError", (error) =>
+			Effect.catchTag("SchemaError", (error) =>
 				Effect.fail(
 					new OAuthError({
 						message: "Failed to parse token response into a Token Schema",

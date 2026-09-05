@@ -1,4 +1,4 @@
-import { Prompt } from "@effect/cli";
+import { Prompt } from "effect/unstable/cli";
 import type { PolarEnvironment } from "../services/oauth";
 
 export const environmentPrompt = Prompt.select<PolarEnvironment>({

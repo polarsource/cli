@@ -1,19 +1,17 @@
 import { Schema } from "effect";
 
 export const MigrationOrigin = Schema.String.pipe(
-  Schema.brand("MigrationOrigin")
+	Schema.brand("MigrationOrigin"),
 );
-export type MigrationOrigin = Schema.Schema.Type<typeof MigrationOrigin>;
+export type MigrationOrigin = typeof MigrationOrigin.Type;
 
 export const MigrationDestination = Schema.String.pipe(
-  Schema.brand("MigrationDestination")
+	Schema.brand("MigrationDestination"),
 );
-export type MigrationDestination = Schema.Schema.Type<
-  typeof MigrationDestination
->;
+export type MigrationDestination = typeof MigrationDestination.Type;
 
 export const MigrationContext = Schema.Struct({
-  from: MigrationOrigin,
-  to: MigrationDestination,
+	from: MigrationOrigin,
+	to: MigrationDestination,
 });
-export type MigrationContext = Schema.Schema.Type<typeof MigrationContext>;
+export type MigrationContext = typeof MigrationContext.Type;
