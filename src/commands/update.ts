@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { chmod, mkdtemp, rename, rm, unlink } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { Console, Data, Effect, Schema } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
+import { Console, Data, Effect, FileSystem, Schema } from "effect";
 import { Command } from "effect/unstable/cli";
 import * as OAuth from "../services/oauth";
 import { VERSION } from "../version";
@@ -10,78 +11,61 @@ import { VERSION } from "../version";
 export class UpdateError extends Data.TaggedError("UpdateError")<{
 	message: string;
 	cause?: unknown;
-	code?: unknown;
 }> {}
-
-const fsError = (cause: unknown) =>
-	new UpdateError({
-		message: cause instanceof Error ? cause.message : String(cause),
-		cause,
-		code:
-			typeof cause === "object" && cause !== null && "code" in cause
-				? cause.code
-				: undefined,
-	});
 
 export const replaceBinary = (
 	newBinaryPath: string,
 	binaryPath: string,
-): Effect.Effect<void, UpdateError> =>
+): Effect.Effect<void, UpdateError, FileSystem.FileSystem> =>
 	Effect.gen(function* () {
-		yield* Effect.tryPromise({
-			try: () => chmod(newBinaryPath, 0o755),
-			catch: (cause) =>
-				new UpdateError({ message: "Failed to chmod new binary", cause }),
-		});
+		const fs = yield* FileSystem.FileSystem;
+		yield* fs
+			.chmod(newBinaryPath, 0o755)
+			.pipe(
+				Effect.mapError(
+					(cause) =>
+						new UpdateError({ message: "Failed to chmod new binary", cause }),
+				),
+			);
 
 		const tempPath = join(dirname(binaryPath), `.polar-update-${Date.now()}`);
 
 		yield* Effect.gen(function* () {
-			const newBinary = yield* Effect.tryPromise({
-				try: () => Bun.file(newBinaryPath).arrayBuffer(),
-				catch: fsError,
-			});
-			yield* Effect.tryPromise({
-				try: () => Bun.write(tempPath, newBinary),
-				catch: fsError,
-			});
-			yield* Effect.tryPromise({
-				try: () => rename(tempPath, binaryPath),
-				catch: fsError,
-			});
+			const newBinary = yield* fs.readFile(newBinaryPath);
+			yield* fs.writeFile(tempPath, newBinary);
+			yield* fs.rename(tempPath, binaryPath);
 		}).pipe(
-			Effect.tapError(() =>
-				Effect.promise(() => unlink(tempPath).catch(() => {})),
+			Effect.tapError(() => fs.remove(tempPath).pipe(Effect.ignore)),
+			Effect.catchReason("PlatformError", "PermissionDenied", () =>
+				Effect.gen(function* () {
+					const proc = Bun.spawn(["sudo", "mv", newBinaryPath, binaryPath], {
+						stdout: "inherit",
+						stderr: "inherit",
+						stdin: "inherit",
+					});
+					const exitCode = yield* Effect.tryPromise({
+						try: () => proc.exited,
+						catch: (cause) =>
+							new UpdateError({ message: "Failed to run sudo mv", cause }),
+					});
+					if (exitCode !== 0) {
+						return yield* new UpdateError({ message: "sudo mv failed" });
+					}
+				}),
 			),
-			Effect.catch((e) =>
-				e.code === "EACCES"
-					? Effect.gen(function* () {
-							const proc = Bun.spawn(
-								["sudo", "mv", newBinaryPath, binaryPath],
-								{
-									stdout: "inherit",
-									stderr: "inherit",
-									stdin: "inherit",
-								},
-							);
-							const exitCode = yield* Effect.tryPromise({
-								try: () => proc.exited,
-								catch: (cause) =>
-									new UpdateError({ message: "Failed to run sudo mv", cause }),
-							});
-							if (exitCode !== 0) {
-								return yield* new UpdateError({ message: "sudo mv failed" });
-							}
-						})
-					: Effect.fail(e),
+			Effect.mapError(
+				(cause) => new UpdateError({ message: cause.message, cause }),
 			),
 		);
 
-		yield* Effect.tryPromise({
-			try: () => chmod(binaryPath, 0o755),
-			catch: (cause) =>
-				new UpdateError({ message: "Failed to chmod binary", cause }),
-		});
+		yield* fs
+			.chmod(binaryPath, 0o755)
+			.pipe(
+				Effect.mapError(
+					(cause) =>
+						new UpdateError({ message: "Failed to chmod binary", cause }),
+				),
+			);
 	});
 
 const REPO = "polarsource/cli";
@@ -305,7 +289,9 @@ const downloadAndUpdate = (
 
 				yield* Console.log(`${dim}Replacing binary...${reset}`);
 
-				yield* replaceBinary(newBinaryPath, binaryPath);
+				yield* replaceBinary(newBinaryPath, binaryPath).pipe(
+					Effect.provide(BunFileSystem.layer),
+				);
 
 				yield* Console.log("");
 				yield* Console.log(

@@ -86,6 +86,31 @@ afterEach(async () => {
 });
 
 describe("startListening", () => {
+	test.each([
+		401, 500,
+	])("preserves stream error code %i as a typed ListenError", async (code) => {
+		const { fiber } = run();
+		const source = instanceAt(0);
+		const cause = { code, message: "Stream failed (request 401)" };
+		source.onerror?.(cause);
+
+		const error = await Effect.runPromise(Fiber.join(fiber).pipe(Effect.flip));
+		expect(error).toMatchObject({
+			_tag: "ListenError",
+			code,
+			message: cause.message,
+			cause,
+		});
+		expect(source.closed).toBe(true);
+	});
+
+	test("keeps the stream open for errors without a code", () => {
+		run();
+		const source = instanceAt(0);
+		source.onerror?.({ message: "Transient connection error" });
+		expect(source.closed).toBe(false);
+	});
+
 	test("opens a single event source for the listen url", () => {
 		run();
 

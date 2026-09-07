@@ -1,4 +1,4 @@
-import { Effect, Exit, Redacted, Schema } from "effect";
+import { Data, Effect, Exit, Redacted, Schema } from "effect";
 import { Argument, Command } from "effect/unstable/cli";
 import {
 	type ErrorEvent,
@@ -19,6 +19,12 @@ export const LISTEN_BASE_URLS = {
 	production: "https://api.polar.sh/v1/cli/listen",
 	sandbox: "https://sandbox-api.polar.sh/v1/cli/listen",
 } as const;
+
+export class ListenError extends Data.TaggedError("ListenError")<{
+	message: string;
+	code: number;
+	cause?: unknown;
+}> {}
 
 const url = Argument.string("url");
 
@@ -70,7 +76,7 @@ export const startListening = ({
 	createEventSource = defaultCreateEventSource,
 	forward = fetch,
 }: StartListeningOptions) =>
-	Effect.callback<void, OAuth.OAuthError>((resume) => {
+	Effect.callback<void, ListenError>((resume) => {
 		let eventSource: ListenEventSource;
 		// Reconnections happen transparently behind the scenes; the connection
 		// banner should only ever be shown for the very first connection so the
@@ -171,7 +177,8 @@ export const startListening = ({
 				eventSource.close();
 				resume(
 					Effect.fail(
-						new OAuth.OAuthError({
+						new ListenError({
+							code: error.code,
 							message:
 								error.message ??
 								(error.code
@@ -191,13 +198,6 @@ export const startListening = ({
 		});
 	});
 
-const isUnauthorized = (error: OAuth.OAuthError) =>
-	(typeof error.cause === "object" &&
-		error.cause !== null &&
-		"code" in error.cause &&
-		(error.cause as { code?: number }).code === 401) ||
-	error.message.includes("401");
-
 export const listen = Command.make("listen", { url }, ({ url }) =>
 	Effect.gen(function* () {
 		const environment = yield* environmentPrompt;
@@ -208,15 +208,15 @@ export const listen = Command.make("listen", { url }, ({ url }) =>
 		const listenWithToken = (
 			token: Token,
 			retried = false,
-		): Effect.Effect<void, OAuth.OAuthError, never> =>
+		): Effect.Effect<void, ListenError | OAuth.OAuthError, never> =>
 			startListening({
 				listenUrl,
 				forwardUrl: url,
 				organizationName: organization.name,
 				accessToken: Redacted.value(token.token),
 			}).pipe(
-				Effect.catchTag("OAuthError", (error) => {
-					if (retried || !isUnauthorized(error)) {
+				Effect.catchTag("ListenError", (error) => {
+					if (retried || error.code !== 401) {
 						return Effect.fail(error);
 					}
 

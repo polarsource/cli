@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
+import { Effect, FileSystem, PlatformError } from "effect";
 import {
 	getArchiveExtractionCommand,
 	getReleaseArchiveName,
@@ -52,8 +53,22 @@ describe("replaceBinary", () => {
 	let dir: string;
 	let newBinaryPath: string;
 	let binaryPath: string;
+	let writeError: PlatformError.PlatformError | undefined;
+
+	const runReplace = () =>
+		Effect.gen(function* () {
+			const fs = yield* FileSystem.FileSystem;
+			const error = writeError;
+			return yield* replaceBinary(newBinaryPath, binaryPath).pipe(
+				Effect.provideService(FileSystem.FileSystem, {
+					...fs,
+					writeFile: error ? () => Effect.fail(error) : fs.writeFile,
+				}),
+			);
+		}).pipe(Effect.provide(BunFileSystem.layer));
 
 	beforeEach(async () => {
+		writeError = undefined;
 		dir = await makeTemp();
 		newBinaryPath = join(dir, "polar-new");
 		binaryPath = join(dir, "polar");
@@ -66,14 +81,14 @@ describe("replaceBinary", () => {
 	});
 
 	test("replaces target binary with new binary content", async () => {
-		await Effect.runPromise(replaceBinary(newBinaryPath, binaryPath));
+		await Effect.runPromise(runReplace());
 
 		const content = await readFile(binaryPath, "utf8");
 		expect(content).toBe("#!/bin/sh\necho new");
 	});
 
 	test("sets executable permissions on target binary", async () => {
-		await Effect.runPromise(replaceBinary(newBinaryPath, binaryPath));
+		await Effect.runPromise(runReplace());
 
 		const s = await stat(binaryPath);
 		// check owner execute bit
@@ -81,7 +96,7 @@ describe("replaceBinary", () => {
 	});
 
 	test("leaves no temp file behind after success", async () => {
-		await Effect.runPromise(replaceBinary(newBinaryPath, binaryPath));
+		await Effect.runPromise(runReplace());
 
 		// list files in dir — only the replaced binary should remain
 		const { readdir } = await import("node:fs/promises");
@@ -90,31 +105,27 @@ describe("replaceBinary", () => {
 		expect(tempFiles).toHaveLength(0);
 	});
 
-	test("throws and cleans up temp file on non-EACCES write error", async () => {
-		// Simulate a generic I/O error during Bun.write (not EACCES)
-		const bunSpy = spyOn(Bun, "write").mockImplementationOnce(() =>
-			Promise.reject(new Error("EIO: input/output error")),
-		);
+	test("throws and cleans up temp file on non-permission write error", async () => {
+		writeError = PlatformError.systemError({
+			_tag: "Unknown",
+			module: "FileSystem",
+			method: "writeFile",
+			description: "EIO: input/output error",
+		});
 
-		await expect(
-			Effect.runPromise(replaceBinary(newBinaryPath, binaryPath)),
-		).rejects.toThrow("EIO");
+		await expect(Effect.runPromise(runReplace())).rejects.toThrow("EIO");
 
 		const { readdir } = await import("node:fs/promises");
 		const files = await readdir(dir);
 		const tempFiles = files.filter((f) => f.startsWith(".polar-update-"));
 		expect(tempFiles).toHaveLength(0);
-
-		bunSpy.mockRestore();
 	});
 
-	test("does not throw when EACCES triggers sudo fallback", async () => {
-		// Simulate EACCES on rename by mocking Bun.write to throw it
-		const bunSpy = spyOn(Bun, "write").mockImplementationOnce(() => {
-			const err = Object.assign(new Error("EACCES: permission denied"), {
-				code: "EACCES",
-			});
-			return Promise.reject(err);
+	test("does not throw when PermissionDenied triggers sudo fallback", async () => {
+		writeError = PlatformError.systemError({
+			_tag: "PermissionDenied",
+			module: "FileSystem",
+			method: "writeFile",
 		});
 
 		// Mock Bun.spawn so sudo mv appears to succeed
@@ -125,7 +136,7 @@ describe("replaceBinary", () => {
 				}) as ReturnType<typeof Bun.spawn>,
 		);
 
-		await Effect.runPromise(replaceBinary(newBinaryPath, binaryPath));
+		await Effect.runPromise(runReplace());
 
 		// Verify sudo mv was called with the right args
 		expect(spawnSpy).toHaveBeenCalledWith(
@@ -133,16 +144,14 @@ describe("replaceBinary", () => {
 			expect.objectContaining({ stdin: "inherit" }),
 		);
 
-		bunSpy.mockRestore();
 		spawnSpy.mockRestore();
 	});
 
 	test("throws when sudo mv exits non-zero", async () => {
-		const bunSpy = spyOn(Bun, "write").mockImplementationOnce(() => {
-			const err = Object.assign(new Error("EACCES: permission denied"), {
-				code: "EACCES",
-			});
-			return Promise.reject(err);
+		writeError = PlatformError.systemError({
+			_tag: "PermissionDenied",
+			module: "FileSystem",
+			method: "writeFile",
 		});
 
 		const spawnSpy = spyOn(Bun, "spawn").mockImplementationOnce(
@@ -152,11 +161,10 @@ describe("replaceBinary", () => {
 				}) as ReturnType<typeof Bun.spawn>,
 		);
 
-		await expect(
-			Effect.runPromise(replaceBinary(newBinaryPath, binaryPath)),
-		).rejects.toThrow("sudo mv failed");
+		await expect(Effect.runPromise(runReplace())).rejects.toThrow(
+			"sudo mv failed",
+		);
 
-		bunSpy.mockRestore();
 		spawnSpy.mockRestore();
 	});
 });
