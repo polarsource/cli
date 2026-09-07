@@ -2,7 +2,7 @@ import { Schema, Struct } from "effect";
 
 export const CreateProductPriceCustom = Schema.Struct({
 	amountType: Schema.Literal("custom"),
-	priceCurrency: Schema.Literal("usd"),
+	priceCurrency: Schema.Literal("USD"),
 	minimumAmount: Schema.optional(Schema.Number),
 	maximumAmount: Schema.optional(Schema.Number),
 	presetAmount: Schema.optional(Schema.Number),

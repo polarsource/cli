@@ -1,3 +1,5 @@
+import type { AddressInput } from "@polar-sh/sdk/models/components/addressinput.js";
+import type { PresentmentCurrency } from "@polar-sh/sdk/models/components/presentmentcurrency.js";
 import { Context, Data, Effect, Layer, Schema } from "effect";
 import { CustomerCreate } from "../../schemas/Customer";
 import type { MigrationContext } from "../../schemas/Migration";
@@ -50,6 +52,15 @@ export const make = Effect.gen(function* () {
 										try: () =>
 											client.products.create({
 												...product,
+												prices: product.prices.map((price) =>
+													price.amountType === "custom"
+														? {
+																...price,
+																priceCurrency:
+																	price.priceCurrency as PresentmentCurrency,
+															}
+														: price,
+												),
 												organizationId: migration.to,
 											}),
 										catch: (error) =>
@@ -91,6 +102,11 @@ export const make = Effect.gen(function* () {
 										try: () =>
 											client.customers.create({
 												...customer,
+												billingAddress: customer.billingAddress && {
+													...customer.billingAddress,
+													country: customer.billingAddress
+														.country as AddressInput["country"],
+												},
 												organizationId: migration.to,
 											}),
 										catch: (error) =>

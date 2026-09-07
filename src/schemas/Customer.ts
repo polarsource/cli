@@ -6,7 +6,10 @@ export const CustomerCreate = Schema.Struct({
 	email: Schema.String,
 	billingAddress: Schema.optional(
 		Schema.Struct({
-			country: Schema.Enum(AddressInputCountryAlpha2Input),
+			country: Schema.Union([
+				Schema.Enum(AddressInputCountryAlpha2Input),
+				Schema.String,
+			]),
 			city: Schema.NullOr(Schema.String),
 			state: Schema.NullOr(Schema.String),
 		}),

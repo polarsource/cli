@@ -86,7 +86,7 @@ describe("migration schemas", () => {
 			{ amountType: "free" },
 			{
 				amountType: "custom",
-				priceCurrency: "usd",
+				priceCurrency: "USD",
 				minimumAmount: 50,
 				presetAmount: 100,
 			},
@@ -135,7 +135,7 @@ describe("migration schemas", () => {
 		).toBe(true);
 	});
 
-	test("accepts optional billing addresses and validates SDK country codes", async () => {
+	test("accepts optional billing addresses, enum countries, and arbitrary strings", async () => {
 		for (const billingAddress of [
 			undefined,
 			{ country: "US", city: null, state: null },
@@ -153,11 +153,15 @@ describe("migration schemas", () => {
 			).toEqual(input);
 		}
 		expect(
-			Exit.isFailure(
+			Exit.isSuccess(
 				Schema.decodeUnknownExit(CustomerCreate)({
 					name: "Customer",
 					email: "customer@example.com",
-					billingAddress: { country: "invalid", city: null, state: null },
+					billingAddress: {
+						country: "custom-country",
+						city: null,
+						state: null,
+					},
 				}),
 			),
 		).toBe(true);
