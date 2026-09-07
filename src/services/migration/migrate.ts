@@ -1,4 +1,3 @@
-import type { AddressInput } from "@polar-sh/sdk/models/components/addressinput.js";
 import { Context, Data, Effect, Layer, Schema } from "effect";
 import { CustomerCreate } from "../../schemas/Customer";
 import type { MigrationContext } from "../../schemas/Migration";
@@ -83,11 +82,6 @@ export const make = Effect.gen(function* () {
 										try: () =>
 											client.customers.create({
 												...customer,
-												billingAddress: customer.billingAddress && {
-													...customer.billingAddress,
-													country: customer.billingAddress
-														.country as AddressInput["country"],
-												},
 												organizationId: migration.to,
 											}),
 										catch: (error) =>
