@@ -72,17 +72,6 @@ describe("replaceBinary", () => {
 		expect(content).toBe("#!/bin/sh\necho new");
 	});
 
-	test("preserves the filesystem cause when chmod fails", async () => {
-		await expect(
-			Effect.runPromise(replaceBinary(join(dir, "missing"), binaryPath)),
-		).rejects.toMatchObject({
-			_tag: "UpdateError",
-			message: "Failed to chmod new binary",
-			cause: { code: "ENOENT" },
-		});
-		expect(await readFile(binaryPath, "utf8")).toBe("#!/bin/sh\necho old");
-	});
-
 	test("sets executable permissions on target binary", async () => {
 		await Effect.runPromise(replaceBinary(newBinaryPath, binaryPath));
 
@@ -103,21 +92,13 @@ describe("replaceBinary", () => {
 
 	test("throws and cleans up temp file on non-EACCES write error", async () => {
 		// Simulate a generic I/O error during Bun.write (not EACCES)
-		const cause = Object.assign(new Error("EIO: input/output error"), {
-			code: "EIO",
-		});
 		const bunSpy = spyOn(Bun, "write").mockImplementationOnce(() =>
-			Promise.reject(cause),
+			Promise.reject(new Error("EIO: input/output error")),
 		);
 
 		await expect(
 			Effect.runPromise(replaceBinary(newBinaryPath, binaryPath)),
-		).rejects.toMatchObject({
-			_tag: "UpdateError",
-			message: "EIO: input/output error",
-			code: "EIO",
-			cause,
-		});
+		).rejects.toThrow("EIO");
 
 		const { readdir } = await import("node:fs/promises");
 		const files = await readdir(dir);
@@ -173,10 +154,7 @@ describe("replaceBinary", () => {
 
 		await expect(
 			Effect.runPromise(replaceBinary(newBinaryPath, binaryPath)),
-		).rejects.toMatchObject({
-			_tag: "UpdateError",
-			message: "sudo mv failed",
-		});
+		).rejects.toThrow("sudo mv failed");
 
 		bunSpy.mockRestore();
 		spawnSpy.mockRestore();

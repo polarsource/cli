@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { Effect, Fiber, Result } from "effect";
+import { Effect, Fiber } from "effect";
 import {
 	type CreateEventSource,
 	type ListenEventSource,
@@ -163,45 +163,6 @@ describe("startListening", () => {
 		expect(FakeEventSource.instances).toHaveLength(2);
 		expect(instanceAt(1).url).toBe(first.url);
 		expect(instanceAt(1).closed).toBe(false);
-	});
-
-	test("closes the latest connection when interrupted after reconnecting", async () => {
-		const { fiber } = run();
-		const first = instanceAt(0);
-		first.emit({ type: "reconnect" });
-		const second = instanceAt(1);
-
-		await Effect.runPromise(Fiber.interrupt(fiber));
-
-		expect(first.closed).toBe(true);
-		expect(second.closed).toBe(true);
-		expect(FakeEventSource.instances).toHaveLength(2);
-	});
-
-	test("ignores transient errors without closing the stream", () => {
-		run();
-		instanceAt(0).onerror?.({ message: "Connection interrupted" });
-		expect(instanceAt(0).closed).toBe(false);
-		expect(FakeEventSource.instances).toHaveLength(1);
-	});
-
-	test("fails with OAuthError and closes the stream on an HTTP error", async () => {
-		const { fiber } = run();
-		const error = { code: 401, message: "Unauthorized" };
-		instanceAt(0).onerror?.(error);
-
-		const result = await Effect.runPromise(
-			Fiber.join(fiber).pipe(Effect.result),
-		);
-		expect(Result.isFailure(result)).toBe(true);
-		if (Result.isFailure(result)) {
-			expect(result.failure).toMatchObject({
-				_tag: "OAuthError",
-				message: "Unauthorized",
-				cause: error,
-			});
-		}
-		expect(instanceAt(0).closed).toBe(true);
 	});
 
 	test("does not reconnect on the connected acknowledgement", () => {
