@@ -1,9 +1,7 @@
 import type { AddressInput } from "@polar-sh/sdk/models/components/addressinput.js";
-import type { PresentmentCurrency } from "@polar-sh/sdk/models/components/presentmentcurrency.js";
 import { Context, Data, Effect, Layer, Schema } from "effect";
 import { CustomerCreate } from "../../schemas/Customer";
 import type { MigrationContext } from "../../schemas/Migration";
-import { ProductCreate } from "../../schemas/Product";
 import * as Polar from "../polar";
 import type * as LemonSqueezy from "./lemon/provider";
 
@@ -36,14 +34,6 @@ export const make = Effect.gen(function* () {
 				const providerProducts = provider.products(migration.from);
 
 				yield* providerProducts.pipe(
-					Effect.flatMap(Schema.encodeEffect(Schema.Array(ProductCreate))),
-					Effect.mapError(
-						(error) =>
-							new Polar.PolarError({
-								message: "Failed to encode products",
-								cause: error,
-							}),
-					),
 					Effect.flatMap((products) =>
 						Effect.all(
 							products.map((product) =>
@@ -52,15 +42,6 @@ export const make = Effect.gen(function* () {
 										try: () =>
 											client.products.create({
 												...product,
-												prices: product.prices.map((price) =>
-													price.amountType === "custom"
-														? {
-																...price,
-																priceCurrency:
-																	price.priceCurrency as PresentmentCurrency,
-															}
-														: price,
-												),
 												organizationId: migration.to,
 											}),
 										catch: (error) =>

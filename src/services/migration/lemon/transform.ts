@@ -2,10 +2,8 @@ import type {
 	ListCustomers,
 	ListVariants,
 } from "@lemonsqueezy/lemonsqueezy.js";
-import type { ProductPriceCustomCreate } from "@polar-sh/sdk/models/components/productpricecustomcreate.js";
-import type { ProductPriceFixedCreate } from "@polar-sh/sdk/models/components/productpricefixedcreate.js";
-import type { ProductPriceFreeCreate } from "@polar-sh/sdk/models/components/productpricefreecreate.js";
 import type { SubscriptionRecurringInterval } from "@polar-sh/sdk/models/components/subscriptionrecurringinterval.js";
+import type { ProductCreate } from "../../../schemas/Product";
 
 export const parseCustomers = (customers: ListCustomers["data"]) =>
 	customers.map((customer) => ({
@@ -43,10 +41,7 @@ export const parseVariants = (variants: ListVariants["data"]) =>
 
 export const parsePrice = (
 	variant: ListVariants["data"][number],
-):
-	| ProductPriceFixedCreate
-	| ProductPriceFreeCreate
-	| ProductPriceCustomCreate => {
+): (typeof ProductCreate.Encoded)["prices"][number] => {
 	const priceCurrency = "usd";
 	const priceAmount = variant.attributes.price;
 
@@ -63,20 +58,11 @@ export const parsePrice = (
 	if (payWhatYouWant) {
 		return {
 			amountType: "custom",
-			priceAmount,
-			priceCurrency,
+			priceCurrency: "USD",
 			minimumAmount:
 				variant.attributes.min_price < 50 ? 50 : variant.attributes.min_price,
 			presetAmount: variant.attributes.suggested_price,
-		} as ProductPriceCustomCreate;
-	}
-
-	if (priceAmount > 0) {
-		return {
-			amountType: "fixed",
-			priceAmount,
-			priceCurrency,
-		} as ProductPriceFixedCreate;
+		};
 	}
 
 	return {
