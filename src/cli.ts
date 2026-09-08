@@ -1,6 +1,6 @@
-import { Command } from "@effect/cli";
-import { BunContext, BunRuntime } from "@effect/platform-bun";
+import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
+import { Command } from "effect/unstable/cli";
 import { listen } from "./commands/listen";
 import { login } from "./commands/login";
 import { logout } from "./commands/logout";
@@ -9,32 +9,28 @@ import { update } from "./commands/update";
 import * as Migration from "./services/migration/migrate";
 import * as OAuth from "./services/oauth";
 import * as Polar from "./services/polar";
-import { showUpdateNotice, checkForUpdateInBackground } from "./services/update-check";
+import {
+	checkForUpdateInBackground,
+	showUpdateNotice,
+} from "./services/update-check";
 import { VERSION } from "./version";
 
 const mainCommand = Command.make("polar").pipe(
-  Command.withSubcommands([
-    login,
-    logout,
-    migrate,
-    listen,
-    update
-  ])
+	Command.withSubcommands([login, logout, migrate, listen, update]),
 );
 
 const cli = Command.run(mainCommand, {
-  name: "Polar CLI",
-  version: VERSION,
+	version: VERSION.replace(/^v/, ""),
 });
 
 const services = Layer.mergeAll(
-  OAuth.layer,
-  Polar.layer,
-  Migration.layer,
-  BunContext.layer
+	OAuth.layer,
+	Polar.layer,
+	Migration.layer,
+	BunServices.layer,
 );
 
 showUpdateNotice();
 checkForUpdateInBackground();
 
-cli(process.argv).pipe(Effect.provide(services), BunRuntime.runMain);
+cli.pipe(Effect.provide(services), BunRuntime.runMain);

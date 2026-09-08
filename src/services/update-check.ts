@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, mkdirSync } from "fs";
-import { writeFile } from "fs/promises";
-import { homedir } from "os";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { VERSION } from "../version";
 
 const REPO = "polarsource/cli";

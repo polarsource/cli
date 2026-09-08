@@ -1,10 +1,24 @@
 {
+  "$schema": "https://raw.githubusercontent.com/Effect-TS/language-service/refs/heads/main/schema.json",
   "extends": "@sindresorhus/tsconfig",
   "compilerOptions": {
     "outDir": "dist",
-    "skipLibCheck": true,
-    "module": "esnext",
+    "target": "ES2022",
+    "module": "preserve",
     "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "verbatimModuleSyntax": true,
+    "rewriteRelativeImportExtensions": true,
+    "noEmit": true,
+    "declaration": false,
+    "incremental": true,
+    "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo",
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUnusedLocals": true,
+    "noImplicitOverride": true,
+    "sourceMap": true,
+    "skipLibCheck": true,
     "plugins": [
       {
         "name": "@effect/language-service"

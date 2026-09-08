@@ -1,5 +1,5 @@
-import { Command } from "@effect/cli";
 import { Console, Effect } from "effect";
+import { Command } from "effect/unstable/cli";
 import * as OAuth from "../services/oauth";
 
 export const logout = Command.make("logout", {}, () =>

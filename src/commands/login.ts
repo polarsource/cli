@@ -1,5 +1,5 @@
-import { Command } from "@effect/cli";
 import { Console, Effect } from "effect";
+import { Command } from "effect/unstable/cli";
 import { environmentPrompt } from "../prompts/environment";
 import * as OAuth from "../services/oauth";
 

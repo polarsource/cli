@@ -5,9 +5,9 @@ import * as OAuth from "./oauth";
 export class PolarError extends Data.TaggedError("PolarError")<{
 	message: string;
 	cause?: unknown;
-}> { }
+}> {}
 
-export class Polar extends Context.Tag("Polar")<Polar, PolarImpl>() { }
+export class Polar extends Context.Service<Polar, PolarImpl>()("Polar") {}
 
 interface PolarImpl {
 	getClient: (
@@ -65,6 +65,6 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layer = Layer.scoped(Polar, make).pipe(
+export const layer = Layer.effect(Polar, make).pipe(
 	Layer.provide(PolarRequirementsLayer),
 );
