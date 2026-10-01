@@ -3,6 +3,7 @@ import { writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { VERSION } from "../version";
+import { getUpgradeCommand, isHomebrewInstallation } from "./installation";
 
 const REPO = "polarsource/cli";
 const STATE_DIR = join(homedir(), ".polar");
@@ -30,7 +31,7 @@ export function showUpdateNotice(): void {
 
 		process.stderr.write(
 			`\n  ${dim}Update available:${reset} ${dim}${VERSION}${reset} ${dim}→${reset} ${bold}${cyan}${state.latestVersion}${reset}\n` +
-				`  ${dim}Run${reset} ${cyan}polar update${reset} ${dim}to update${reset}\n\n`,
+				`  ${dim}Run${reset} ${cyan}${getUpgradeCommand()}${reset} ${dim}to update${reset}\n\n`,
 		);
 	} catch {
 		// Silently ignore any errors
@@ -38,6 +39,10 @@ export function showUpdateNotice(): void {
 }
 
 export function checkForUpdateInBackground(): void {
+	// Homebrew tracks available formula versions. GitHub's latest release may
+	// not be available in the tap yet, so do not advertise it to brew users.
+	if (isHomebrewInstallation()) return;
+
 	try {
 		let shouldCheck = true;
 

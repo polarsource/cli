@@ -176,3 +176,12 @@ jobs:
             *.zip
             checksums.txt
           generate_release_notes: true
+
+  homebrew:
+    needs: release
+    if: github.event_name == 'push' && !contains(github.ref_name, '-')
+    uses: ./.github/workflows/homebrew.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

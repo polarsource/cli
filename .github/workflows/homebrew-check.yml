@@ -1,0 +1,65 @@
+name: Check Homebrew support
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/homebrew*.yml
+      - .github/workflows/release.yml
+      - scripts/homebrew*.ts
+      - src/**
+      - bun.lock
+      - package.json
+      - tsconfig.json
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/homebrew*.yml
+      - .github/workflows/release.yml
+      - scripts/homebrew*.ts
+      - src/**
+      - bun.lock
+      - package.json
+      - tsconfig.json
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+
+      - uses: Homebrew/actions/setup-homebrew@master
+
+      - name: Generate formula from latest stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release_tag=$(gh release view --repo polarsource/cli --json tagName --jq .tagName)
+          gh release download "$release_tag" --repo polarsource/cli --pattern checksums.txt --dir release
+          brew tap-new polarsource/homebrew-validation --no-git
+          validation_tap=$(brew --repository polarsource/homebrew-validation)
+          bun scripts/homebrew.ts "$release_tag" release/checksums.txt "$validation_tap/Formula/polar.rb"
+
+      - name: Install and validate formula
+        run: |
+          brew install --build-from-source --skip-link polarsource/homebrew-validation/polar
+          brew test --force polarsource/homebrew-validation/polar
+          brew style --formula polarsource/homebrew-validation/polar
+          brew audit --strict polarsource/homebrew-validation/polar

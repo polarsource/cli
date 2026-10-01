@@ -5,6 +5,10 @@ import { dirname, join } from "node:path";
 import { BunFileSystem } from "@effect/platform-bun";
 import { Console, Data, Effect, FileSystem, Schema } from "effect";
 import { Command } from "effect/unstable/cli";
+import {
+	HOMEBREW_UPGRADE_COMMAND,
+	isHomebrewInstallation,
+} from "../services/installation";
 import * as OAuth from "../services/oauth";
 import { VERSION } from "../version";
 
@@ -307,6 +311,13 @@ const downloadAndUpdate = (
 
 export const update = Command.make("update", {}, () =>
 	Effect.gen(function* () {
+		if (isHomebrewInstallation()) {
+			yield* Console.log(
+				`Polar is managed by Homebrew. Run ${HOMEBREW_UPGRADE_COMMAND} to update.`,
+			);
+			return;
+		}
+
 		const green = "\x1b[32m";
 		const dim = "\x1b[2m";
 		const reset = "\x1b[0m";
