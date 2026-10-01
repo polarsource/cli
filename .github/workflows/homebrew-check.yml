@@ -45,7 +45,7 @@ jobs:
       - run: bun run typecheck
       - run: bun test
 
-      - uses: Homebrew/actions/setup-homebrew@master
+      - uses: Homebrew/actions/setup-homebrew@e99025eb970cfa124b8284a35463d87426917478
 
       - name: Generate formula from latest stable release
         env:
